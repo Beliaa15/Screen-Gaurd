@@ -73,7 +73,7 @@ class SAHIInference:
             
             # Create a centered window
             self.alert_window = tk.Toplevel(self.root)
-            self.alert_window.title("تحذير!")
+            self.alert_window.title("Screen Guard")
             #self.alert_window.overrideredirect(True)
             self.alert_window.attributes("-fullscreen", True)
             self.alert_window.attributes("-topmost", True)  # Keep on top
@@ -96,11 +96,11 @@ class SAHIInference:
             main_label.pack(expand=True, pady=(50, 20))
 
             # System information display
-            info_text = f"""SECURITY ALERT DETAILS:
-Computer: {sys_info['computer_name']}
-IP Address: {sys_info['ip_address']}
-User: {sys_info['username']}
-Time: {sys_info['timestamp']}
+            info_text = f"""COMPUTER DETAILS:
+        Computer: {sys_info['computer_name']}
+        IP Address: {sys_info['ip_address']}
+        User: {sys_info['username']}
+        Time: {sys_info['timestamp']}
 
 System locked due to mobile phone detection"""
 
@@ -259,7 +259,7 @@ System locked due to mobile phone detection"""
                     isPerson = True
                 elif det[0] == "cell phone":
                     isMobile = True
-            if isPerson and isMobile:     
+            if isMobile:     
                 self.consecutive_detections += 1
                 self.consecutive_misses = 0
                 print(f"person with Mobile detected! detections: {self.consecutive_detections}")
@@ -279,7 +279,7 @@ System locked due to mobile phone detection"""
                 # Enable OK button after 3 consecutive misses
                 if self.consecutive_misses >= self.consecutive_max:
                     if self.ok_button and self.ok_button['state'] == 'disabled':
-                        self.ok_button.config(state='normal', text='OK - Safe to Close')
+                        self.ok_button.config(state='normal', text='OK (No Mobile Detected - Safe to Close)')
                 else:
                     # Still counting misses, keep button disabled
                     if self.ok_button:
