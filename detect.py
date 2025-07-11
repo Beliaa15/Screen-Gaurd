@@ -9,6 +9,10 @@ from pathlib import Path
 import threading
 import torch
 import cv2
+import socket
+import os
+import getpass
+from datetime import datetime
 from sahi import AutoDetectionModel
 from sahi.predict import get_sliced_prediction
 
@@ -64,6 +68,9 @@ class SAHIInference:
         self.create_root()
 
         if self.alert_window is None:
+            # Get system information
+            sys_info = self.get_system_info()
+            
             # Create a centered window
             self.alert_window = tk.Toplevel(self.root)
             self.alert_window.title("تحذير!")
@@ -77,16 +84,35 @@ class SAHIInference:
             self.alert_window.configure(bg='red')
             self.alert_window.resizable(False, False)
 
-            # Label with a large alert message
-            label = tk.Label(
+            # Main alert message in Arabic
+            main_label = tk.Label(
                 self.alert_window, 
                 text=" تم ايقاف النظام لدواعى امنية برجاء التحقق من عدم وجود هاتف محمول امام الشاشة ", 
                 fg="white", 
                 bg="red", 
                 font=("Helvetica", 25, "bold"),
-                wraplength = screen_width - 100
+                wraplength=screen_width - 100
             )
-            label.pack(expand=True, pady=20)
+            main_label.pack(expand=True, pady=(50, 20))
+
+            # System information display
+            info_text = f"""SECURITY ALERT DETAILS:
+Computer: {sys_info['computer_name']}
+IP Address: {sys_info['ip_address']}
+User: {sys_info['username']}
+Time: {sys_info['timestamp']}
+
+System locked due to mobile phone detection"""
+
+            info_label = tk.Label(
+                self.alert_window,
+                text=info_text,
+                fg="yellow",
+                bg="red",
+                font=("Courier", 20, "bold"),
+                justify="left"
+            )
+            info_label.pack(pady=20)
 
             # Button to close the alert
             self.ok_button = tk.Button(
@@ -94,7 +120,7 @@ class SAHIInference:
                 text="OK (Mobile Detected - Cannot Close)",
                 state="disabled", 
                 command=self.hide_alert, 
-                font=("Helvetica", 30, "bold"),
+                font=("Helvetica", 20, "bold"),
                 bg="white",
                 fg="red",
                 wraplength=600
@@ -107,6 +133,9 @@ class SAHIInference:
         self.alert_window.attributes("-topmost", True)
         self.alert_window.protocol("WM_DELETE_WINDOW", lambda: None)
         self.alert_active = True
+        
+        # Log alert creation
+        self.log_security_event("SECURITY_ALERT_CREATED", f"Full-screen security alert created and displayed")
 
     def hide_alert(self):
         """Hide the alert window only if mobile is not detected for 3 consecutive frames."""
@@ -115,8 +144,10 @@ class SAHIInference:
                 self.alert_window.withdraw()  # Hide the alert window
                 self.alert_window.attributes("-topmost", False)  # Remove topmost attribute
                 self.alert_active = False
+                self.log_security_event("SECURITY_ALERT_CLOSED", f"Alert closed by user after {self.consecutive_max} consecutive clear frames")
                 print("Alert closed - no mobile detected for 3 consecutive frames")
         else:
+            self.log_security_event("ALERT_CLOSE_DENIED", f"User attempted to close alert but mobile still detected - {self.consecutive_max - self.consecutive_misses} more clear frames needed")
             print(f"Cannot close alert - mobile still detected. Need {self.consecutive_max - self.consecutive_misses} more misses")
 
     def show_alert_in_thread(self):
@@ -130,6 +161,8 @@ class SAHIInference:
                     self.alert_window.deiconify()
                     self.alert_window.lift()
                     self.alert_window.attributes("-topmost", True)
+                    self.alert_active = True
+                    self.log_security_event("SECURITY_ALERT_REAPPEARED", "Alert window reappeared - mobile phone detected again")
             except tk.TclError:
                 # Window doesn't exist anymore, create new one
                 self.alert_window = None
@@ -157,7 +190,10 @@ class SAHIInference:
                 windows = gw.getWindowsWithTitle("Notepad++")
                 if windows:
                     windows[0].minimize()
-                    print("Minimized Notepad++")
+                    sys_info = self.get_system_info()
+                    print(f"SECURITY ALERT: Minimized Notepad++ - {sys_info['computer_name']} ({sys_info['ip_address']}) - User: {sys_info['username']} - {sys_info['timestamp']}")
+                    # Log security event
+                    self.log_security_event("Minimized Notepad++")
                     # Show alert in main thread
                     self.show_alert_in_thread()
                 return  # Stop searching after finding Notepad++ process
@@ -171,6 +207,8 @@ class SAHIInference:
                 if windows and windows[0].isMinimized:
                     windows[0].restore()
                     print("Restored Notepad++")
+                    # Log security event
+                    self.log_security_event("Restored Notepad++")
                     self.close_alert()
                 return  # Stop searching after finding Notepad++ process
             
@@ -232,6 +270,7 @@ class SAHIInference:
                 # Show alert again if mobile detected after alert was closed
                 if not self.alert_active and self.consecutive_detections >= 1:
                     self.show_alert_in_thread()
+                    self.log_security_event("MOBILE_PHONE_ALERT_SHOWN", f"Alert displayed - mobile phone detected with person")
             else:
                 self.consecutive_misses += 1
                 self.consecutive_detections = 0
@@ -248,13 +287,19 @@ class SAHIInference:
 
             if self.consecutive_detections >= self.consecutive_max and not self.notepad_minimized:
                 self.minimize_notepadpp()
+                self.log_security_event("MOBILE_PHONE_DETECTED", f"System locked after {self.consecutive_max} consecutive detections")
                 self.notepad_minimized = True
                 self.consecutive_detections = 0
                  
             if self.consecutive_misses >= self.consecutive_max and self.notepad_minimized:   
                 self.restore_notepadpp()
+                self.log_security_event("MOBILE_PHONE_CLEARED", f"System restored after {self.consecutive_max} consecutive clear frames")
                 self.notepad_minimized = False
-                self.consecutive_misses = 0   
+                self.consecutive_misses = 0
+                
+            # Log every detection instance (not just when alert is first shown)
+            if isPerson and isMobile:
+                self.log_security_event("MOBILE_PHONE_DETECTION", f"Mobile phone detected with person - frame #{self.consecutive_detections}")   
 
             if view_img:
                 cv2.imshow("detection", frame)
@@ -287,7 +332,54 @@ class SAHIInference:
         parser.add_argument("--exist-ok", action="store_true", help="existing project/name ok, do not increment")
         return parser.parse_args()
 
-
+    def get_system_info(self):
+        """Get system information for the alert."""
+        try:
+            # Get IP address
+            hostname = socket.gethostname()
+            ip_address = socket.gethostbyname(hostname)
+        except:
+            ip_address = "Unknown"
+        
+        # Get logged-in user
+        try:
+            username = getpass.getuser()
+        except:
+            username = "Unknown"
+        
+        # Get current timestamp
+        timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        
+        # Get computer name
+        try:
+            computer_name = os.environ.get('COMPUTERNAME', 'Unknown')
+        except:
+            computer_name = "Unknown"
+        
+        return {
+            'ip_address': ip_address,
+            'username': username,
+            'timestamp': timestamp,
+            'computer_name': computer_name
+        }
+    
+    def log_security_event(self, event_type, details=""):
+        """Log security events to a file."""
+        try:
+            sys_info = self.get_system_info()
+            log_entry = f"[{sys_info['timestamp']}] {event_type} - Computer: {sys_info['computer_name']} - IP: {sys_info['ip_address']} - User: {sys_info['username']} - {details}\n"
+            
+            # Create logs directory if it doesn't exist
+            Path("logs").mkdir(exist_ok=True)
+            
+            # Write to log file
+            log_file = f"logs/security_log_{datetime.now().strftime('%Y-%m-%d')}.txt"
+            with open(log_file, "a", encoding="utf-8") as f:
+                f.write(log_entry)
+                
+            print(f"Security event logged: {event_type}")
+        except Exception as e:
+            print(f"Failed to log security event: {e}")
 
 
 if __name__ == "__main__":
