@@ -2,13 +2,14 @@
 Security utilities for password management, logging, and system information.
 """
 
-import hashlib
 import base64
-import socket
-import os
 import getpass
+import hashlib
+import os
+import socket
 from datetime import datetime
 from pathlib import Path
+from typing import Dict, Optional
 from cryptography.fernet import Fernet
 from config import Config
 
@@ -52,7 +53,7 @@ class SecurityUtils:
             self._fernet_key = base64.urlsafe_b64encode(fallback_key)
             self._cipher = Fernet(self._fernet_key)
 
-    def verify_password(self, entered_password):
+    def verify_password(self, entered_password: str) -> bool:
         """Verify entered password against encrypted store"""
         try:
             # Hash the entered password with the same method used for storage
@@ -90,14 +91,14 @@ class SecurityUtils:
             self.log_security_event("PASSWORD_VERIFICATION_ERROR", f"Error during password verification: {e}")
             return False
 
-    def get_security_password_hint(self):
+    def get_security_password_hint(self) -> str:
         """Provide encrypted hint for the security password"""
         # Encrypted hint that doesn't reveal the actual password
         encrypted_hint = "The password follows the pattern: [Word][Number][Symbol][Word] - Think about system security and the number of attempts allowed"
         return encrypted_hint
 
     @staticmethod
-    def get_system_info():
+    def get_system_info() -> Dict[str, str]:
         """Get system information for the alert."""
         try:
             # Get IP address
@@ -129,7 +130,7 @@ class SecurityUtils:
         }
     
     @staticmethod
-    def log_security_event(event_type, details=""):
+    def log_security_event(event_type: str, details: str = "") -> None:
         """Log security events to a file."""
         try:
             sys_info = SecurityUtils.get_system_info()

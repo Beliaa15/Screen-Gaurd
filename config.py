@@ -8,6 +8,12 @@ class Config:
     # Detection settings
     CONSECUTIVE_MAX_DETECTIONS = 3
     CONFIDENCE_THRESHOLD = 0.5
+    DEFAULT_CAMERA_INDEX = 0
+    
+    # Timing and performance settings
+    CPU_MEASUREMENT_INTERVAL = 1.0  # seconds - interval for accurate CPU measurement
+    MONITORING_LOOP_INTERVAL = 2  # seconds - how often to check for recording tools
+    MONITORING_ERROR_RETRY_INTERVAL = 5  # seconds - retry interval on monitoring errors
     
     # Alert settings
     RECORDING_ALERT_COOLDOWN = 30  # seconds
@@ -49,6 +55,18 @@ class Config:
     # CPU usage thresholds
     RECORDING_CPU_THRESHOLD = 5  # percent
     NVIDIA_CPU_THRESHOLD = 10  # percent
+    
+    # Keyboard monitoring hotkeys
+    PRINT_SCREEN_HOTKEYS = ['print screen', 'alt+print screen']
+    SNIPPING_TOOL_HOTKEYS = ['windows+shift+s']
+    
+    # Detection keywords for command line analysis
+    RECORDING_KEYWORDS = ['record', 'capture', 'stream', 'broadcast']
+    
+    # Alert messages
+    NVIDIA_RECORDING_ACTIVE_MESSAGE = "NVIDIA Recording Active"
+    PRINT_SCREEN_DETECTION_MESSAGE = "Print Screen Capture"
+    SNIPPING_TOOL_DETECTION_MESSAGE = "Snipping Tool Hotkey"
     
     @classmethod
     def ensure_directories(cls):

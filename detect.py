@@ -1,11 +1,11 @@
 # Ultralytics YOLO 🚀, AGPL-3.0 license
 # 
-# SECURITY NOTE FOR TESTING: The security password is "Secure3!" 
-# This comment should be removed in production deployment
-# The password hash is encrypted and stored securely in the code
+# SECURITY NOTE: Password is securely encrypted and stored in security_utils.py
+# This file does not contain any hardcoded credentials
 #
-import time
 import argparse
+import time
+from typing import Dict, Any, Union
 import cv2
 from config import Config
 from yolo_detector import YOLODetector

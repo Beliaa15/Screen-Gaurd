@@ -4,6 +4,7 @@ Process manager for handling application minimization and restoration.
 
 import psutil
 import pygetwindow as gw
+from typing import Optional
 from security_utils import SecurityUtils
 
 class ProcessManager:
@@ -12,7 +13,7 @@ class ProcessManager:
     def __init__(self):
         self.notepad_minimized = False
     
-    def minimize_notepadpp(self):
+    def minimize_notepadpp(self) -> None:
         """Minimize Notepad++ window."""
         for proc in psutil.process_iter(['name']):
             if proc.info['name'] == 'notepad++.exe':
@@ -26,7 +27,7 @@ class ProcessManager:
                     SecurityUtils.log_security_event("NOTEPAD_MINIMIZED", "Notepad++ minimized due to security violation")
                 return  # Stop searching after finding Notepad++ process
 
-    def restore_notepadpp(self):
+    def restore_notepadpp(self) -> None:
         """Restore Notepad++ window."""
         for proc in psutil.process_iter(['name']):
             if proc.info['name'] == 'notepad++.exe':
@@ -39,10 +40,10 @@ class ProcessManager:
                     SecurityUtils.log_security_event("NOTEPAD_RESTORED", "Notepad++ restored after security clearance")
                 return  # Stop searching after finding Notepad++ process
     
-    def set_notepad_minimized(self, status):
+    def set_notepad_minimized(self, status: bool) -> None:
         """Set the notepad minimized status."""
         self.notepad_minimized = status
     
-    def is_notepad_minimized(self):
+    def is_notepad_minimized(self) -> bool:
         """Check if notepad is currently minimized."""
         return self.notepad_minimized

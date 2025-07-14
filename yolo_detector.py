@@ -2,9 +2,10 @@
 YOLO object detection with SAHI integration for enhanced small object detection.
 """
 
-import torch
 import cv2
+import torch
 from pathlib import Path
+from typing import Tuple, List, Any
 from sahi import AutoDetectionModel
 from sahi.predict import get_sliced_prediction
 from ultralytics.utils.plotting import Annotator, colors
@@ -17,7 +18,7 @@ class YOLODetector:
         self.device = 'cuda' if torch.cuda.is_available() else 'cpu'
         self.detection_model = None
         
-    def load_model(self, weights=None):
+    def load_model(self, weights: str = None) -> None:
         """Load a YOLOv8 model with specified weights for object detection using SAHI."""
         if weights is None:
             weights = Config.DEFAULT_WEIGHTS
@@ -44,7 +45,7 @@ class YOLODetector:
         
         print(f"Model loaded: {yolov8_model_path} on device: {self.device}")
     
-    def detect_objects(self, frame):
+    def detect_objects(self, frame) -> Tuple[Any, List[Tuple], bool, bool]:
         """
         Detect objects in a frame using SAHI.
         
@@ -94,6 +95,6 @@ class YOLODetector:
         
         return frame, detection_data, has_person, has_mobile
     
-    def is_model_loaded(self):
+    def is_model_loaded(self) -> bool:
         """Check if model is loaded."""
         return self.detection_model is not None

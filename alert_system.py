@@ -2,9 +2,10 @@
 Alert system for displaying security warnings and notifications.
 """
 
+import time
 import tkinter as tk
 from tkinter import messagebox
-import time
+from typing import List, Optional
 from config import Config
 from security_utils import SecurityUtils
 
@@ -243,7 +244,6 @@ Time: {sys_info['timestamp']}"""
 
     def show_recording_alert(self, detected_tools):
         """Display an alert for screen recording tool detection."""
-        import time
         self.create_root()
 
         # Check if we're in grace period - don't show alert during grace period
@@ -364,7 +364,6 @@ Time: {sys_info['timestamp']}"""
 
     def force_show_recording_alert(self, detected_tools):
         """Force show recording alert bypassing grace period checks."""
-        import time
         
         # Log the force show event
         SecurityUtils.log_security_event("RECORDING_ALERT_FORCE_SHOW", f"Force showing recording alert for tools: {', '.join(detected_tools)}")
@@ -392,7 +391,6 @@ Time: {sys_info['timestamp']}"""
 
     def show_recording_alert_in_thread(self, detected_tools):
         """Show recording alert in a thread-safe manner."""
-        import time
         
         # Check if we're in grace period
         if self.is_recording_grace_period_active():
@@ -684,7 +682,6 @@ User: {sys_info['username']} | Time: {sys_info['timestamp']}"""
         if not self.recording_grace_active:
             return False
 
-        import time
         current_time = time.time()
         if current_time - self.recording_grace_start_time > Config.RECORDING_GRACE_PERIOD:
             # Grace period expired
@@ -696,7 +693,6 @@ User: {sys_info['username']} | Time: {sys_info['timestamp']}"""
 
     def start_recording_grace_period(self):
         """Start the grace period after password verification."""
-        import time
         self.recording_grace_start_time = time.time()
         self.recording_grace_active = True
         SecurityUtils.log_security_event("RECORDING_GRACE_PERIOD_STARTED", f"Grace period of {Config.RECORDING_GRACE_PERIOD} seconds started for recording app closure")
@@ -717,7 +713,6 @@ User: {sys_info['username']} | Time: {sys_info['timestamp']}"""
 
     def get_grace_period_debug_info(self):
         """Get detailed grace period debug information."""
-        import time
         if not self.recording_grace_active:
             return "Grace period not active"
         
