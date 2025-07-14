@@ -27,6 +27,10 @@ class AlertSystem:
         self.attempts_label = None  # Initialize attempts_label
         self.security_utils = SecurityUtils()
         
+        # Recording alert grace period tracking
+        self.recording_grace_start_time = 0
+        self.recording_grace_active = False
+        
     def create_root(self):
         """Create the Tkinter root window."""
         if self.root is None:
@@ -239,7 +243,14 @@ Time: {sys_info['timestamp']}"""
 
     def show_recording_alert(self, detected_tools):
         """Display an alert for screen recording tool detection."""
+        import time
         self.create_root()
+
+        # Check if we're in grace period - don't show alert during grace period
+        if self.is_recording_grace_period_active():
+            remaining_time = Config.RECORDING_GRACE_PERIOD - (time.time() - self.recording_grace_start_time)
+            SecurityUtils.log_security_event("RECORDING_ALERT_SUPPRESSED_GRACE", f"Recording alert suppressed - {remaining_time:.0f}s grace period remaining")
+            return
 
         if self.recording_alert_window is None:
             sys_info = SecurityUtils.get_system_info()
@@ -327,6 +338,16 @@ Time: {sys_info['timestamp']}"""
                 font=("Helvetica", 16, "bold")
             )
             password_warning.pack(pady=10)
+            
+            # Grace period information
+            grace_info = tk.Label(
+                self.recording_alert_window,
+                text=f"After password verification: {Config.RECORDING_GRACE_PERIOD} seconds to close recording apps",
+                fg="cyan",
+                bg="darkred",
+                font=("Helvetica", 14, "bold")
+            )
+            grace_info.pack(pady=5)
 
         # Show the recording alert window
         self.recording_alert_window.deiconify()
@@ -335,7 +356,72 @@ Time: {sys_info['timestamp']}"""
         self.recording_alert_window.protocol("WM_DELETE_WINDOW", lambda: None)
         self.recording_alert_active = True
         
+        # Update detected tools display if alert was already created
+        if hasattr(self, 'tools_label') and self.tools_label is not None:
+            self.update_recording_tools_display(detected_tools)
+        
         SecurityUtils.log_security_event("RECORDING_ALERT_SHOWN", f"Screen recording alert displayed for tools: {', '.join(detected_tools)}")
+
+    def force_show_recording_alert(self, detected_tools):
+        """Force show recording alert bypassing grace period checks."""
+        import time
+        
+        # Log the force show event
+        SecurityUtils.log_security_event("RECORDING_ALERT_FORCE_SHOW", f"Force showing recording alert for tools: {', '.join(detected_tools)}")
+        
+        if self.recording_alert_window is not None and self.recording_alert_window.winfo_exists():
+            try:
+                if self.recording_alert_window.state() == "withdrawn":
+                    # If the window exists and is hidden, just show it again
+                    self.recording_alert_window.deiconify()
+                    self.recording_alert_window.lift()
+                    self.recording_alert_window.attributes("-topmost", True)
+                    self.recording_alert_active = True
+                    self.update_recording_tools_display(detected_tools)
+                    SecurityUtils.log_security_event("RECORDING_ALERT_REAPPEARED", f"Recording alert forcibly reappeared - tools still detected: {', '.join(detected_tools)}")
+                else:
+                    # Alert is already visible, just update tools
+                    self.update_recording_tools_display(detected_tools)
+            except tk.TclError:
+                # Window doesn't exist anymore, create new one
+                self.recording_alert_window = None
+                self.show_recording_alert(detected_tools)
+        else:
+            # Create and show the alert window
+            self.show_recording_alert(detected_tools)
+
+    def show_recording_alert_in_thread(self, detected_tools):
+        """Show recording alert in a thread-safe manner."""
+        import time
+        
+        # Check if we're in grace period
+        if self.is_recording_grace_period_active():
+            remaining_time = Config.RECORDING_GRACE_PERIOD - (time.time() - self.recording_grace_start_time)
+            SecurityUtils.log_security_event("RECORDING_ALERT_SUPPRESSED_GRACE", f"Recording alert suppressed - {remaining_time:.0f}s grace period remaining")
+            return
+            
+        if self.recording_alert_active:
+            # Update tools display if alert is already active
+            self.update_recording_tools_display(detected_tools)
+            return
+            
+        if self.recording_alert_window is not None and self.recording_alert_window.winfo_exists():
+            try:
+                if self.recording_alert_window.state() == "withdrawn":
+                    # If the window exists and is hidden, just show it again
+                    self.recording_alert_window.deiconify()
+                    self.recording_alert_window.lift()
+                    self.recording_alert_window.attributes("-topmost", True)
+                    self.recording_alert_active = True
+                    self.update_recording_tools_display(detected_tools)
+                    SecurityUtils.log_security_event("RECORDING_ALERT_REAPPEARED", f"Recording alert reappeared - tools still detected: {', '.join(detected_tools)}")
+            except tk.TclError:
+                # Window doesn't exist anymore, create new one
+                self.recording_alert_window = None
+                self.show_recording_alert(detected_tools)
+        else:
+            # Create and show the alert window
+            self.show_recording_alert(detected_tools)
 
     def hide_recording_alert(self):
         """Hide the recording alert window after password verification."""
@@ -343,7 +429,11 @@ Time: {sys_info['timestamp']}"""
             self.recording_alert_window.withdraw()
             self.recording_alert_window.attributes("-topmost", False)
             self.recording_alert_active = False
-            SecurityUtils.log_security_event("RECORDING_ALERT_CLOSED", "Recording alert closed after password verification")
+            
+            # Start grace period to allow user to close recording apps
+            self.start_recording_grace_period()
+            
+            SecurityUtils.log_security_event("RECORDING_ALERT_CLOSED", "Recording alert closed after password verification - grace period started")
 
     def show_password_entry_dialog(self):
         """Show password entry dialog for recording alert dismissal"""
@@ -375,16 +465,19 @@ Time: {sys_info['timestamp']}"""
         warning_label.pack(pady=(50, 30))
         
         # Violation message
-        violation_text = """SECURITY VIOLATION DETECTED
+        violation_text = f"""SECURITY VIOLATION DETECTED
 Screen recording/capture attempt blocked
-Administrator password required to continue"""
-        
+Administrator password required to continue
+
+After password verification, you will have {Config.RECORDING_GRACE_PERIOD} seconds
+to close all recording applications before the alert reappears."""
+
         violation_label = tk.Label(
             main_frame,
             text=violation_text,
             fg="white",
             bg="black",
-            font=("Helvetica", 20, "bold"),
+            font=("Helvetica", 18, "bold"),
             justify="center"
         )
         violation_label.pack(pady=20)
@@ -485,6 +578,7 @@ User: {sys_info['username']} | Time: {sys_info['timestamp']}"""
             SecurityUtils.log_security_event("PASSWORD_VERIFIED", "Security password verified successfully")
             self.close_password_dialog()
             self.hide_recording_alert()
+            self.start_recording_grace_period() # Start grace period
             self.security_utils.password_attempts = 0  # Reset attempts
         else:
             # Incorrect password
@@ -585,6 +679,62 @@ User: {sys_info['username']} | Time: {sys_info['timestamp']}"""
             self.password_entry_window = None
             self.password_entry = None
 
+    def is_recording_grace_period_active(self):
+        """Check if we're currently in the grace period after password entry."""
+        if not self.recording_grace_active:
+            return False
+
+        import time
+        current_time = time.time()
+        if current_time - self.recording_grace_start_time > Config.RECORDING_GRACE_PERIOD:
+            # Grace period expired
+            self.recording_grace_active = False
+            SecurityUtils.log_security_event("RECORDING_GRACE_PERIOD_EXPIRED", f"Recording grace period of {Config.RECORDING_GRACE_PERIOD} seconds has expired")
+            return False
+        
+        return True
+
+    def start_recording_grace_period(self):
+        """Start the grace period after password verification."""
+        import time
+        self.recording_grace_start_time = time.time()
+        self.recording_grace_active = True
+        SecurityUtils.log_security_event("RECORDING_GRACE_PERIOD_STARTED", f"Grace period of {Config.RECORDING_GRACE_PERIOD} seconds started for recording app closure")
+
+    def get_grace_period_status(self):
+        """Get grace period status information."""
+        if not self.recording_grace_active:
+            return "No active grace period"
+
+        current_time = time.time()
+        remaining_time = Config.RECORDING_GRACE_PERIOD - (current_time - self.recording_grace_start_time)
+        
+        if remaining_time <= 0:
+            self.recording_grace_active = False
+            return "Grace period expired"
+        
+        return f"Grace period: {remaining_time:.0f}s remaining to close recording apps"
+
+    def get_grace_period_debug_info(self):
+        """Get detailed grace period debug information."""
+        import time
+        if not self.recording_grace_active:
+            return "Grace period not active"
+        
+        current_time = time.time()
+        elapsed = current_time - self.recording_grace_start_time
+        remaining = Config.RECORDING_GRACE_PERIOD - elapsed
+        
+        return {
+            'active': self.recording_grace_active,
+            'start_time': self.recording_grace_start_time,
+            'current_time': current_time,
+            'elapsed': elapsed,
+            'remaining': remaining,
+            'expired': remaining <= 0,
+            'grace_period_duration': Config.RECORDING_GRACE_PERIOD
+        }
+
     def update_recording_tools_display(self, tools):
         """Update the detected tools display in recording alert."""
         if hasattr(self, 'tools_label') and self.tools_label is not None:
@@ -597,3 +747,15 @@ User: {sys_info['username']} | Time: {sys_info['timestamp']}"""
                 self.root.update()
             except tk.TclError:
                 pass  # Prevent crash if window closed
+
+    def check_and_reshow_recording_alert_if_needed(self, detected_tools):
+        """Check if recording alert should be reshown after grace period expires."""
+        if (not self.recording_alert_active and 
+            not self.is_recording_grace_period_active() and 
+            detected_tools and 
+            not self.alert_active):  # Don't interfere with mobile alerts
+            
+            SecurityUtils.log_security_event("RECORDING_ALERT_GRACE_EXPIRED", f"Grace period expired, recording tools still detected: {', '.join(detected_tools)}")
+            self.show_recording_alert_in_thread(detected_tools)
+            return True
+        return False

@@ -94,8 +94,14 @@ class SAHIInference:
                 SecurityUtils.log_security_event("SCREEN_RECORDING_DETECTED", f"Screen recording tools detected: {', '.join(recording_tools)}")
                 # Check if we should show recording alert
                 if self.check_recording_alert_needed(recording_tools):
-                    self.alert_system.show_recording_alert(recording_tools)
+                    self.alert_system.show_recording_alert_in_thread(recording_tools)
                     self.system_monitor.update_last_recording_detection_time()
+                # Always update display if alert is active
+                elif self.alert_system.recording_alert_active:
+                    self.alert_system.update_recording_tools_display(recording_tools)
+                # Check if alert should reappear after grace period
+                else:
+                    self.alert_system.check_and_reshow_recording_alert_if_needed(recording_tools)
 
             # Perform object detection
             frame, detection_data, is_person, is_mobile = self.detector.detect_objects(frame)
@@ -144,11 +150,28 @@ class SAHIInference:
             # Process GUI events to keep interface responsive
             self.alert_system.update_tkinter()
             
+            # Continuously check if grace period has expired and tools are still detected
+            if (self.alert_system.recording_grace_active and 
+                not self.alert_system.is_recording_grace_period_active()):
+                # Grace period just expired, force check for active recording tools immediately
+                current_recording_tools = self.system_monitor.force_check_recording_tools()
+                
+                if current_recording_tools:
+                    SecurityUtils.log_security_event("GRACE_PERIOD_EXPIRED_TOOLS_DETECTED", f"Grace period expired, tools still active: {', '.join(current_recording_tools)}")
+                    # Force reappearance of alert using the specialized method
+                    self.alert_system.force_show_recording_alert(current_recording_tools)
+                    self.system_monitor.update_last_recording_detection_time()
+                else:
+                    SecurityUtils.log_security_event("GRACE_PERIOD_EXPIRED_NO_TOOLS", "Grace period expired, no recording tools detected")
+                
+                # Reset grace period flag to prevent repeated checks
+                self.alert_system.recording_grace_active = False
+            
             # Check if recording tools were detected in background thread
             if hasattr(self.system_monitor, 'pending_recording_tools') and self.system_monitor.pending_recording_tools:
                 tools = self.system_monitor.pending_recording_tools
                 self.system_monitor.pending_recording_tools = []  # Clear the pending list
-                self.alert_system.show_recording_alert(tools)
+                self.alert_system.show_recording_alert_in_thread(tools)
                 self.system_monitor.update_last_recording_detection_time()
 
             if cv2.waitKey(1) & 0xFF == ord("q"):
@@ -178,6 +201,10 @@ class SAHIInference:
             
         # Don't show if recording alert is already active
         if self.alert_system.recording_alert_active:
+            return False
+            
+        # Don't show if we're in grace period
+        if self.alert_system.is_recording_grace_period_active():
             return False
             
         return self.system_monitor.check_recording_alert_needed(detected_tools)

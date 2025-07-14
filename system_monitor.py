@@ -58,6 +58,10 @@ class SystemMonitor:
                             cpu_usage = proc.cpu_percent()
                             if cpu_usage > Config.RECORDING_CPU_THRESHOLD:  # If using more than threshold CPU, likely recording
                                 active_recording_tools.append(proc.info['name'])
+                            else:
+                                # For some tools, even if CPU is low, we consider them active if running
+                                # This ensures we catch tools that might be idle but ready to record
+                                active_recording_tools.append(proc.info['name'])
                         except:
                             # If we can't get CPU usage, assume it's active if it's a known recorder
                             active_recording_tools.append(proc.info['name'])
@@ -66,6 +70,9 @@ class SystemMonitor:
                 for tool in Config.SCREEN_RECORDING_PROCESSES:
                     if tool.lower() in proc_name:
                         running_tools.append(proc.info['name'])
+                        # Also add to active tools if it's a recording process
+                        if proc.info['name'] not in active_recording_tools:
+                            active_recording_tools.append(proc.info['name'])
                             
             except (psutil.NoSuchProcess, psutil.AccessDenied):
                 continue
@@ -203,6 +210,16 @@ class SystemMonitor:
         # Show recording alert for snipping tool - store for main thread
         if self.check_recording_alert_needed(["Snipping Tool Hotkey"]):
             self.pending_recording_tools = ["Snipping Tool Hotkey"]
+
+    def force_check_recording_tools(self):
+        """Force check for recording tools bypassing cooldown periods."""
+        recording_tools = self.detect_screen_recording_tools()
+        
+        # Also check for NVIDIA recording activity
+        if self.detect_nvidia_recording():
+            recording_tools.append("NVIDIA Recording Active")
+        
+        return recording_tools
 
     def update_last_recording_detection_time(self):
         """Update the timestamp for last recording detection."""

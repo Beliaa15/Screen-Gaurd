@@ -11,6 +11,7 @@ class Config:
     
     # Alert settings
     RECORDING_ALERT_COOLDOWN = 30  # seconds
+    RECORDING_GRACE_PERIOD = 30  # seconds - grace period after password entry to close recording apps
     MAX_PASSWORD_ATTEMPTS = 3
     
     # SAHI (Slicing Aided Hyper Inference) settings
