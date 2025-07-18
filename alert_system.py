@@ -7,12 +7,12 @@ import tkinter as tk
 from tkinter import messagebox
 from typing import List, Optional
 from config import Config
-from security_utils import SecurityUtils
+from security_utils import SecurityUtils, LDAPAuthenticator
 
 class AlertSystem:
     """Manages all security alert windows and dialogs."""
     
-    def __init__(self):
+    def __init__(self, config):
         self.root = None
         self.alert_window = None
         self.alert_active = False
@@ -27,6 +27,7 @@ class AlertSystem:
         self.tools_label = None  # Initialize tools_label
         self.attempts_label = None  # Initialize attempts_label
         self.security_utils = SecurityUtils()
+        self.ldap = LDAPAuthenticator(config)
         
         # Recording alert grace period tracking
         self.recording_grace_start_time = 0
@@ -754,3 +755,10 @@ User: {sys_info['username']} | Time: {sys_info['timestamp']}"""
             self.show_recording_alert_in_thread(detected_tools)
             return True
         return False
+
+    def verify_password(self, username, password):
+        # Replace your local password check with:
+        success, role = self.ldap.authenticate(username, password)
+        if success:
+            return True, role
+        return False, "Invalid credentials"

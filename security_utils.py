@@ -12,6 +12,9 @@ from pathlib import Path
 from typing import Dict, Optional
 from cryptography.fernet import Fernet
 from config import Config
+import ldap3
+from ldap3.core.exceptions import LDAPException
+
 
 class SecurityUtils:
     """Utility class for security-related operations."""
@@ -147,3 +150,64 @@ class SecurityUtils:
             print(f"Security event logged: {event_type}")
         except Exception as e:
             print(f"Failed to log security event: {e}")
+
+class LDAPAuthenticator:
+    def __init__(self, config):
+        self.server_uri = config.LDAP_SERVER
+        self.base_dn = config.LDAP_BASE_DN
+        self.admin_group = config.LDAP_ADMIN_GROUP
+        self.operator_group = config.LDAP_OPERATOR_GROUP
+        self.user_group = config.LDAP_USER_GROUP
+        
+    def authenticate(self, username, password):
+        try:
+            username_only = username
+            domain = self.base_dn
+            
+            # Establish connection
+            server = ldap3.Server(self.server_uri, get_info=ldap3.ALL)
+            
+            # Try different authentication formats
+            auth_user = f"{username_only}@{self.base_dn}"
+            
+            conn = ldap3.Connection(
+                server, 
+                user=auth_user, 
+                password=password, 
+                auto_bind=True
+            )
+                
+            if not conn or not conn.bound:
+                return False, "authentication_failed"
+            
+            # Prepare search base - convert domain to DN format
+            if '.' in domain:
+                # Convert domain.com to DC=domain,DC=com
+                domain_parts = domain.split('.')
+                search_base = ','.join([f"DC={part}" for part in domain_parts])
+            else:
+                search_base = f"DC={domain}"
+            
+            # Check group membership
+            conn.search(
+                search_base=search_base,
+                search_filter=f"(sAMAccountName={username_only})",
+                attributes=['memberOf']
+            )
+            
+            if not conn.entries:
+                return False, "no_groups"
+                
+            groups = [group.split(',')[0][3:] for group in conn.entries[0].memberOf]
+            
+            if self.admin_group in groups:
+                return True, "admin"
+            elif self.operator_group in groups:
+                return True, "operator"
+            elif self.user_group in groups:
+                return True, "user"
+            else:
+                return False, "no_groups"
+                
+        except LDAPException as e:
+            return False, str(e)

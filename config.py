@@ -73,3 +73,10 @@ class Config:
         """Ensure required directories exist."""
         Path(cls.MODELS_DIR).mkdir(exist_ok=True)
         Path(cls.LOGS_DIR).mkdir(exist_ok=True)
+
+    # LDAP Configuration
+    LDAP_SERVER = "ldap://192.168.1.26"  
+    LDAP_BASE_DN = "security-local.com"    
+    LDAP_ADMIN_GROUP = "SecurityAdmins"
+    LDAP_OPERATOR_GROUP = "SecurityOperators"
+    LDAP_USER_GROUP = "SecurityUsers"
