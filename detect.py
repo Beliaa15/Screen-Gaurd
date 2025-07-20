@@ -13,6 +13,7 @@ from alert_system import AlertSystem
 from system_monitor import SystemMonitor
 from process_manager import ProcessManager
 from security_utils import SecurityUtils
+from security_overlay import SecurityOverlay
 
 
 class SAHIInference:
@@ -23,12 +24,38 @@ class SAHIInference:
         self.capture_index = 0
         self.consecutive_detections = 0
         self.consecutive_misses = 0
+        self.gui_authenticated = False  # Track if GUI authentication was completed
         
         # Initialize components
         self.detector = YOLODetector()
-        self.alert_system = AlertSystem()
+        self.alert_system = AlertSystem(Config())
         self.system_monitor = SystemMonitor()
         self.process_manager = ProcessManager()
+        
+        # Initialize security overlay for authentication
+        self.security_overlay = SecurityOverlay()
+        
+    def set_gui_authenticated(self, authenticated=True):
+        """Set GUI authentication status."""
+        self.gui_authenticated = authenticated
+        if authenticated:
+            # Mark security overlay as unlocked when GUI auth is complete
+            self.security_overlay.is_device_locked = False
+        
+    def start_with_authentication(self):
+        """Start the system with authentication requirement."""
+        SecurityUtils.log_security_event("SYSTEM_STARTUP", "Physical security system starting with authentication")
+        
+        # Use the authentication manager directly instead of security overlay mainloop
+        if self.security_overlay.auth_manager.require_authentication():
+            # Authentication successful
+            self.security_overlay.unlock_device()
+            SecurityUtils.log_security_event("SYSTEM_ACCESS_GRANTED", f"System access granted to {self.security_overlay.get_current_user_info()['username']}")
+            return True
+        else:
+            # Authentication failed
+            SecurityUtils.log_security_event("SYSTEM_ACCESS_DENIED", "System access denied - authentication failed")
+            return False
         
     def inference(
         self, weights=None, source="test.mp4", view_img=False, save_img=False, exist_ok=False, track=True
@@ -44,6 +71,18 @@ class SAHIInference:
             exist_ok (bool): Overwrite existing files.
             track (bool): Enable object tracking with SAHI
         """
+        # Check authentication first if required
+        if Config.AUTHENTICATION_REQUIRED and not self.gui_authenticated:
+            if not self.security_overlay.is_device_unlocked():
+                SecurityUtils.log_security_event("INFERENCE_ACCESS_DENIED", "Inference access denied - not authenticated")
+                print("Authentication required. Please authenticate to access the system.")
+                # Start the authentication process instead of returning
+                if self.start_with_authentication():
+                    SecurityUtils.log_security_event("AUTHENTICATION_COMPLETED", "Authentication completed, starting inference")
+                else:
+                    SecurityUtils.log_security_event("AUTHENTICATION_FAILED", "Authentication failed, cannot start inference")
+                    return
+        
         if weights is None:
             weights = Config.DEFAULT_WEIGHTS
             
@@ -74,6 +113,11 @@ class SAHIInference:
         self.detector.load_model(weights)
         
         while cap.isOpened():
+            # Check authentication status continuously (skip if GUI authentication was used)
+            if Config.AUTHENTICATION_REQUIRED and not self.gui_authenticated and not self.security_overlay.is_device_unlocked():
+                SecurityUtils.log_security_event("INFERENCE_INTERRUPTED", "Inference interrupted - authentication lost")
+                break
+            
             success, frame = cap.read()
             if not success:
                 # For webcam, if read fails, check camera availability
@@ -149,6 +193,11 @@ class SAHIInference:
                 
             # Process GUI events to keep interface responsive
             self.alert_system.update_tkinter()
+            
+            # Update security overlay to maintain session and handle authentication
+            if Config.AUTHENTICATION_REQUIRED:
+                self.security_overlay.update_tkinter()
+                self.security_overlay.update_activity()  # Update user activity timestamp
             
             # Continuously check if grace period has expired and tools are still detected
             if (self.alert_system.recording_grace_active and 

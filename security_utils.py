@@ -166,8 +166,6 @@ class LDAPAuthenticator:
             
             # Establish connection
             server = ldap3.Server(self.server_uri, get_info=ldap3.ALL)
-            
-            # Try different authentication formats
             auth_user = f"{username_only}@{self.base_dn}"
             
             conn = ldap3.Connection(

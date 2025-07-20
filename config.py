@@ -80,3 +80,23 @@ class Config:
     LDAP_ADMIN_GROUP = "SecurityAdmins"
     LDAP_OPERATOR_GROUP = "SecurityOperators"
     LDAP_USER_GROUP = "SecurityUsers"
+    
+    # Authentication Configuration
+    AUTHENTICATION_REQUIRED = True  # Set to False for development/testing without authentication
+    AUTHENTICATION_METHODS = ["email_password", "fingerprint", "face"]
+    SESSION_TIMEOUT = 8 * 60 * 60  # 8 hours in seconds
+    MAX_LOGIN_ATTEMPTS = 3
+    LOGIN_LOCKOUT_DURATION = 300  # 5 minutes in seconds
+    
+    # Face Recognition Settings
+    FACE_RECOGNITION_TOLERANCE = 0.6
+    FACE_ENCODING_MODEL = "large"  # or "small" for faster processing
+    FACE_IMAGES_DIR = "face_data"
+    
+    # Fingerprint Settings
+    FINGERPRINT_ENABLED = True
+    FINGERPRINT_QUALITY_THRESHOLD = 50
+    
+    # Session Management
+    SESSION_CHECK_INTERVAL = 60  # seconds
+    IDLE_TIMEOUT = 30 * 60  # 30 minutes in seconds
