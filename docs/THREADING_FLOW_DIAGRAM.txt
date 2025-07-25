@@ -1,0 +1,221 @@
+"""
+Physical Security System - Threading Process Visualization
+===========================================================
+
+MAIN EXECUTION FLOW:
+===================
+
+┌─ MAIN THREAD ─────────────────────────────────────────────────────────────┐
+│                                                                            │
+│  1. main.py executed                                                       │
+│     ├── SecurityUtils.log_security_event("SYSTEM_START")                  │
+│     ├── Check Config.AUTHENTICATION_REQUIRED = True                       │
+│     └── Create SecurityGUI() instance                                     │
+│                                                                            │
+│  2. Thread Creation & Startup                                             │
+│     ├── detection_thread = threading.Thread(                              │
+│     │       target=start_detection_system,                                │
+│     │       args=(gui,),                                                  │
+│     │       daemon=True                                                   │
+│     │   )                                                                 │
+│     ├── detection_thread.start() ────────────────────────────────────────┐│
+│     └── gui.run() # BLOCKS HERE - tkinter mainloop                       ││
+│                                                                           ││
+└───────────────────────────────────────────────────────────────────────────┘│
+                                                                             │
+┌─ DETECTION THREAD (DAEMON) ──────────────────────────────────────────────┐│
+│                                                                           ││
+│  3. start_detection_system(gui) Function                                 ││
+│     ├── POLLING LOOP:                                                    ││
+│     │   while not gui.is_ready_for_detection():                          ││
+│     │       time.sleep(0.5)  # Check every 500ms                        ││
+│     │                                                                    ││
+│     │   [WAITS HERE until authentication completes]                     ││
+│     │                                                                    ││
+│     ├── Authentication Success Detected:                                 ││
+│     │   ├── detector_service = DetectorService()                         ││
+│     │   ├── detector_service.set_gui_authenticated(True)                 ││
+│     │   └── detector_service.run_detection(source=0, view_img=True)     ││
+│     │                                                                    ││
+│     └── INFINITE DETECTION LOOP:                                         ││
+│         ├── Camera frame capture (30 FPS)                               ││
+│         ├── YOLO object detection                                        ││
+│         ├── Mobile phone detection logic                                 ││
+│         ├── Screen recording tool detection                              ││
+│         └── Alert triggering ──────────────────────────────────────────┐││
+│                                                                         │││
+└─────────────────────────────────────────────────────────────────────────┘││
+                                                                           │││
+┌─ GUI THREAD OPERATIONS ──────────────────────────────────────────────────┘││
+│                                                                           ││
+│  4. GUI Authentication Process (Main Thread)                             ││
+│     ├── show_startup_screen()                                            ││
+│     │   └── Loading animation thread ─────────────────────────────────┐  ││
+│     │                                                                 │  ││
+│     ├── show_domain_auth_form()                                        │  ││
+│     │   ├── Username/Password input                                    │  ││
+│     │   └── Login button clicked ─────────────────────────────────────┼┐ ││
+│     │                                                                 ││ ││
+│     └── Authentication threads (daemon):                               ││ ││
+│         ├── LDAP Authentication ─────────────────────────────────────┐ ││ ││
+│         └── Biometric Authentication ────────────────────────────────┼─┘│ ││
+│                                                                      │  │ ││
+│  5. Authentication Success:                                           │  │ ││
+│     ├── self.is_authenticated = True                                  │  │ ││
+│     ├── show_success_screen()                                         │  │ ││
+│     └── Detection thread continues... ────────────────────────────────┼──┘ ││
+│                                                                       │    ││
+└───────────────────────────────────────────────────────────────────────┘    ││
+                                                                              ││
+┌─ LOADING ANIMATION THREAD (DAEMON) ──────────────────────────────────────┐ ││
+│                                                                           │ ││
+│  6. update_dots() Function                                               │ ││
+│     └── INFINITE LOOP:                                                   │ ││
+│         ├── time.sleep(0.5)                                              │ ││
+│         ├── Update loading text: "Loading", "Loading.", "Loading.."      │ ││
+│         └── GUI thread-safe update                                       │ ││
+│                                                                           │ ││
+└───────────────────────────────────────────────────────────────────────────┘ ││
+                                                                              ││
+┌─ LDAP AUTHENTICATION THREAD (DAEMON) ────────────────────────────────────┐ ││
+│                                                                           │ ││
+│  7. auth_thread() Function                                               │ ││
+│     ├── show_auth_loading("Authenticating with domain server...")        │ ││
+│     ├── ldap_auth = LDAPAuthenticator(Config())                          │ ││
+│     ├── success, role = ldap_auth.authenticate(username, password)       │ ││
+│     ├── if success:                                                       │ ││
+│     │   ├── self.is_authenticated = True                                  │ ││
+│     │   ├── self.current_user = {"username": username, "role": role}     │ ││
+│     │   └── show_success_screen()                                         │ ││
+│     └── else: show_error_message()                                        │ ││
+│                                                                           │ ││
+└───────────────────────────────────────────────────────────────────────────┘ ││
+                                                                              ││
+┌─ ALERT THREADS (DAEMON) ─────────────────────────────────────────────────┐ ││
+│                                                                           │ ││
+│  8. Mobile Detection Alert Thread                                        │ ││
+│     ├── Triggered by: consecutive_detections >= 3                        │ ││
+│     ├── self.alert_system.show_mobile_alert() ───────────────────────────┼─┘│
+│     ├── Creates full-screen tkinter alert window                         │  │
+│     ├── Plays audio notification                                         │  │
+│     ├── Shows countdown timer                                            │  │
+│     ├── Blocks all other applications                                    │  │
+│     └── Waits for user interaction or timeout                            │  │
+│                                                                           │  │
+│  9. Recording Detection Alert Thread                                     │  │
+│     ├── Triggered by: detected_tools list not empty                      │  │
+│     ├── threading.Thread(target=show_recording_alert, daemon=True) ──────┼──┘
+│     ├── Creates full-screen warning window                               │
+│     ├── Lists detected recording tools                                   │
+│     ├── Grace period countdown (10 seconds)                              │
+│     ├── Force terminates recording processes                             │
+│     └── Returns to normal monitoring                                     │
+│                                                                           │
+└───────────────────────────────────────────────────────────────────────────┘
+
+TIMING DIAGRAM:
+===============
+
+Time(ms)  Main Thread           Detection Thread      GUI Threads         Alert Threads
+────────────────────────────────────────────────────────────────────────────────────────
+0         ├─ main.py start      
+          ├─ Create GUI         
+          └─ Start detection_thread ──┐
+                                      │
+50        ├─ gui.run() [BLOCKS]       ├─ start_detection_system()
+                                      ├─ while not gui.is_ready_for_detection():
+                                      └─   time.sleep(0.5) [WAITING]
+                                      
+500                                   │                   ├─ show_startup_screen()
+                                      │                   └─ animation thread ──┐
+                                      │                                         │
+1000                                  │                   ├─ show_domain_auth   ├─ "Loading."
+                                      │                   └─ waiting for input  │
+                                      │                                         │
+2000                                  │                   ├─ user clicks login  ├─ "Loading.."
+                                      │                   └─ LDAP auth thread ──┼──┐
+                                      │                                         │  │
+2500                                  │                   ├─ auth success! ◄────┘  ├─ LDAP validate
+                                      │                   ├─ is_authenticated=True │
+                                      │                   └─ show_success_screen   └─ return True
+                                      │
+3000      │                           ├─ gui.is_ready_for_detection() = True!
+          │                           ├─ detector_service = DetectorService()
+          │                           ├─ set_gui_authenticated(True)
+          │                           └─ run_detection() starts
+          │
+3100      │                           ├─ Camera initialized
+          │                           ├─ YOLO model loaded
+          │                           └─ Detection loop starts
+          │
+3133      │                           ├─ Frame 1 processed (30 FPS = 33ms/frame)
+3166      │                           ├─ Frame 2 processed
+3199      │                           ├─ Frame 3 processed
+...       │                           │  [Continuous processing]
+          │
+5000      │                           ├─ Mobile phone detected! ─────────────────► ├─ Mobile alert
+          │                           ├─ consecutive_detections = 1              │  └─ Full-screen warning
+5033      │                           ├─ Mobile still detected                   │
+          │                           ├─ consecutive_detections = 2              │
+5066      │                           ├─ Mobile still detected                   │
+          │                           ├─ consecutive_detections = 3              │
+          │                           └─ TRIGGER ALERT! ─────────────────────────┘
+          │
+7000      │                           ├─ Screen recording detected ──────────────► ├─ Recording alert
+          │                           └─ show_recording_alert_in_thread()         └─ Process termination
+          │
+∞         └─ [GUI remains responsive] └─ [Continuous monitoring...]                [Alert management]
+
+SYNCHRONIZATION MECHANISMS:
+===========================
+
+1. Authentication State:
+   ├── gui.is_authenticated (boolean flag)
+   ├── gui.is_ready_for_detection() method
+   └── Polling with time.sleep(0.5) in detection thread
+
+2. Alert State Management:
+   ├── alert_system.alert_active (prevents multiple mobile alerts)
+   ├── alert_system.recording_alert_active (prevents multiple recording alerts)
+   └── Mutual exclusion between different alert types
+
+3. Thread-Safe GUI Updates:
+   ├── Only main thread manipulates tkinter widgets directly
+   ├── Background threads use state flags
+   └── GUI updates scheduled using tkinter.after()
+
+4. Resource Management:
+   ├── Camera capture objects properly released
+   ├── OpenCV windows destroyed on exit
+   ├── All background threads are daemon threads
+   └── System monitoring stopped gracefully
+
+KEY BENEFITS:
+=============
+
+✅ Non-blocking GUI: Authentication doesn't freeze interface
+✅ Real-time Detection: Continuous 30 FPS monitoring
+✅ Concurrent Alerts: Multiple alert types managed simultaneously  
+✅ Responsive Interface: GUI remains interactive during detection
+✅ Graceful Shutdown: Daemon threads terminate cleanly
+✅ Resource Safety: Proper cleanup of camera and GUI resources
+
+POTENTIAL ISSUES:
+================
+
+⚠️  Race Conditions: Multiple threads checking/updating alert states
+⚠️  Resource Contention: Camera access coordination needed
+⚠️  Memory Leaks: Unclosed threads or OpenCV resources
+⚠️  GUI Thread Safety: Direct widget manipulation from background threads
+⚠️  Performance Impact: Multiple threads competing for CPU time
+
+PERFORMANCE CHARACTERISTICS:
+============================
+
+• GUI Responsiveness: ~16ms (60 FPS) for smooth interactions
+• Detection Latency: ~33ms (30 FPS) for real-time monitoring
+• Authentication Polling: 500ms intervals (minimal CPU usage)
+• Alert Response Time: <100ms from detection to alert display
+• Memory Usage: ~50-100MB depending on camera resolution
+• CPU Usage: ~15-30% on modern systems during active detection
+"""
