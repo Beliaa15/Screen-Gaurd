@@ -33,7 +33,8 @@ def start_detection_system(gui):
         detector_service.set_gui_authenticated(True)
         
         # Start the main detection loop with camera source (0) instead of default video
-        detector_service.run_detection(source=0, view_img=True)
+        #detector_service.run_detection(source=0, view_img=True)
+        detector_service.inference(**vars(detector_service.parse_opt()))
         
     except Exception as e:
         print(f"❌ Detection system error: {e}")
@@ -68,7 +69,8 @@ if __name__ == "__main__":
             print("⚠️  Warning: Authentication disabled. Starting without GUI...")
             # Run without authentication (development mode)
             detector_service = DetectorService()
-            detector_service.run_detection(source=0, view_img=True)
+            #detector_service.run_detection(source=0, view_img=True)
+            detector_service.inference(**vars(detector_service.parse_opt()))
             
     except KeyboardInterrupt:
         print("\n🛑 System shutdown requested by user")
