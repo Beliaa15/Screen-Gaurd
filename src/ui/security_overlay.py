@@ -8,8 +8,8 @@ This module provides a comprehensive security overlay that:
 - Monitors for session expiry and re-authentication
 """
 
-import tkinter as tk
-from tkinter import messagebox
+import mttkinter.mtTkinter as tk
+import tkinter.messagebox as messagebox
 import threading
 import time
 from typing import Optional

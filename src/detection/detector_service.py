@@ -28,6 +28,7 @@ class DetectorService:
         self.consecutive_detections = 0
         self.consecutive_misses = 0
         self.gui_authenticated = False  # Track if GUI authentication was completed
+        self.last_recording_detection_time = 0
         
         # Initialize components
         self.detector = YOLODetector()
@@ -284,21 +285,6 @@ class DetectorService:
         if weights is None:
             weights = Config.DEFAULT_WEIGHTS
             
-        # Check camera availability first
-        if source == 0 or source == "0":  # Webcam source
-            if not self.system_monitor.check_camera_availability():
-                SecurityUtils.log_security_event("CAMERA_UNAVAILABLE", "Camera not available at startup")
-                self.alert_system.show_camera_alert()
-                # Set retry button callback if button exists
-                if hasattr(self.alert_system, 'retry_button') and self.alert_system.retry_button is not None:
-                    self.alert_system.retry_button.config(command=self.retry_camera_connection)
-                
-                """# Keep checking for camera until available
-                while not self.system_monitor.check_camera_availability():
-                    self.alert_system.update_tkinter()
-                    time.sleep(1)
-                self.alert_system.hide_camera_alert()"""
-
         # Start monitoring for screen recording tools and key presses
         self.system_monitor.start_security_monitoring()
 
@@ -419,20 +405,21 @@ class DetectorService:
         cv2.destroyAllWindows()
         self.system_monitor.stop_security_monitoring()
 
-
     def retry_camera_connection(self):
         """Attempt to reconnect to camera."""
         if self.system_monitor.check_camera_availability():
             self.alert_system.hide_camera_alert()
+            SecurityUtils.log_security_event("CAMERA_RECONNECTED", "Camera successfully reconnected")
         else:
+            SecurityUtils.log_security_event("CAMERA_RETRY_FAILED", "Camera connection retry failed")
             print("❌ Camera still unavailable. Please check camera connection.")
+            # Flash the window to indicate retry failed
+            if hasattr(self.alert_system, 'camera_alert_window') and self.alert_system.camera_alert_window:
+                self.alert_system.camera_alert_window.configure(bg='red')
+                self.alert_system.root.after(500, lambda: self.alert_system.camera_alert_window.configure(bg='orange'))
 
     def check_recording_alert_needed(self, detected_tools):
         """Check if we should show recording alert based on current state."""
-        # Don't show if mobile alert is already active (priority to mobile detection)
-        if self.alert_system.alert_active:
-            return False
-            
         # Don't show if recording alert is already active
         if self.alert_system.recording_alert_active:
             return False
@@ -441,17 +428,21 @@ class DetectorService:
         if self.alert_system.is_recording_grace_period_active():
             return False
             
-        return self.system_monitor.check_recording_alert_needed(detected_tools)
+        # Check cooldown period
+        current_time = time.time()
+        if current_time - self.last_recording_detection_time < Config.RECORDING_ALERT_COOLDOWN:
+            return False
+        
+        return len(detected_tools) > 0
 
     def parse_opt(self):
         """Parse command line arguments."""
         parser = argparse.ArgumentParser()
         parser.add_argument("--weights", type=str, default=Config.DEFAULT_WEIGHTS, help="initial weights path")
-        parser.add_argument("--source", type=str, default=0, help="file/dir/URL/glob, 0 for webcam")
-        parser.add_argument("--view-img", action="store_true", help="show results")
-        parser.add_argument("--save-img", action="store_true", help="save results")
+        parser.add_argument("--source", type=str, default=0, help="video file path")
+        parser.add_argument("--view-img", default="true", help="show results")
+        parser.add_argument("--save-img", default="false", help="save results")
         parser.add_argument("--exist-ok", action="store_true", help="existing project/name ok, do not increment")
-        parser.add_argument("--track", action="store_true", default=True, help="enable object tracking")
         return parser.parse_args()
 
 

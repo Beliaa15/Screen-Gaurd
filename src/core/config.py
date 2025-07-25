@@ -87,7 +87,7 @@ class Config:
     REQUIRE_DOMAIN_IN_USERNAME = False  # Require domain\username format
 
     # Authentication Configuration
-    AUTHENTICATION_REQUIRED = False  # Set to False for development/testing without authentication
+    AUTHENTICATION_REQUIRED = True  # Set to False for development/testing without authentication
     AUTHENTICATION_METHODS = ["email_password", "fingerprint", "face"]
     SESSION_TIMEOUT = 8 * 60 * 60  # 8 hours in seconds
     MAX_LOGIN_ATTEMPTS = 3

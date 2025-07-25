@@ -3,8 +3,8 @@ GUI Manager for Physical Security System
 Provides full-screen startup screen, login interface, and dashboard.
 """
 
-import tkinter as tk
-from tkinter import messagebox
+import mttkinter.mtTkinter as tk
+import tkinter.messagebox as messagebox
 import threading
 import time
 from datetime import datetime

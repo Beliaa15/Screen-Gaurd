@@ -4,33 +4,36 @@ Alert system for displaying security warnings and notifications.
 
 import time
 import threading
-import tkinter as tk
-from tkinter import messagebox, simpledialog
-from typing import List, Optional
+try:
+    import mttkinter.mtTkinter as tk
+    import tkinter.messagebox as messagebox
+    import tkinter.simpledialog as simpledialog
+except ImportError:
+    import tkinter as tk
+    from tkinter import messagebox, simpledialog
+
 
 from ..core.config import Config
-from ..core.base import BaseAlert
 from ..utils.security_utils import SecurityUtils
 from ..auth.ldap_auth import LDAPAuthenticator
 
-
-class AlertSystem(BaseAlert):
+class AlertSystem:
     """Manages all security alert windows and dialogs."""
     
     def __init__(self, config):
         self.root = None
         self.alert_window = None
         self.alert_active = False
-        self.ok_button = None
+        self.ok_button = None  # Initialize ok_button
         self.camera_alert_window = None
         self.camera_alert_active = False
         self.recording_alert_window = None
         self.recording_alert_active = False
         self.password_entry_window = None
         self.password_entry = None
-        self.retry_button = None
-        self.tools_label = None
-        self.attempts_label = None
+        self.retry_button = None  # Initialize retry_button
+        self.tools_label = None  # Initialize tools_label
+        self.attempts_label = None  # Initialize attempts_label
         self.security_utils = SecurityUtils()
         self.ldap = LDAPAuthenticator(config)
         
@@ -42,218 +45,195 @@ class AlertSystem(BaseAlert):
         """Create the Tkinter root window."""
         if self.root is None:
             self.root = tk.Tk()
-            self.root.withdraw()  # Hide the root window
-
-    def show_alert(self, message: str, alert_type: str = "info") -> None:
-        """Show an alert to the user."""
-        if alert_type == "mobile":
-            self.show_mobile_alert()
-        elif alert_type == "camera":
-            self.show_camera_alert()
-        elif alert_type == "recording":
-            self.show_recording_alert([message])
-        else:
-            self.create_root()
-            messagebox.showinfo("Alert", message, parent=self.root)
-
-    def hide_alert(self) -> None:
-        """Hide the current alert."""
-        self.hide_mobile_alert()
-        self.hide_camera_alert()
-        self.hide_recording_alert()
-
-    def is_alert_active(self) -> bool:
-        """Check if an alert is currently active."""
-        return (self.alert_active or self.camera_alert_active or 
-                self.recording_alert_active)
+            self.root.withdraw()  # Hide the root window initially
 
     def show_mobile_alert(self):
         """Display a big alert dialog to the user for mobile phone detection."""
         self.create_root()
 
         if self.alert_window is None:
+            # Get system information
+            sys_info = SecurityUtils.get_system_info()
+            
+            # Create a centered window
             self.alert_window = tk.Toplevel(self.root)
-            self.alert_window.title("SECURITY ALERT")
+            self.alert_window.title("Screen Guard")
             self.alert_window.attributes("-fullscreen", True)
-            self.alert_window.attributes("-topmost", True)
+            self.alert_window.attributes("-topmost", True)  # Keep on top
+            
+            screen_width = self.root.winfo_screenwidth()
+            screen_height = self.root.winfo_screenheight()
+            self.alert_window.geometry(f"{screen_width}x{screen_height}+0+0")
             self.alert_window.configure(bg='red')
             self.alert_window.resizable(False, False)
-            self.alert_window.protocol("WM_DELETE_WINDOW", lambda: None)
-            
-            # Disable escape key
-            self.alert_window.bind('<Escape>', lambda e: None)
-            
-            # Center frame
-            center_frame = tk.Frame(self.alert_window, bg='red')
-            center_frame.pack(expand=True)
-            
-            # Warning symbol
-            warning_label = tk.Label(
-                center_frame,
-                text="⚠️",
-                fg="white",
-                bg="red",
-                font=("Helvetica", 120, "bold")
+
+            # Main alert message in Arabic
+            main_label = tk.Label(
+                self.alert_window, 
+                text=" تم ايقاف النظام لدواعى امنية برجاء التحقق من عدم وجود هاتف محمول امام الشاشة ", 
+                fg="white", 
+                bg="red", 
+                font=("Helvetica", 25, "bold"),
+                wraplength=screen_width - 100
             )
-            warning_label.pack(pady=(50, 20))
-            
-            # Alert title
-            title_label = tk.Label(
-                center_frame,
-                text="SECURITY VIOLATION",
-                fg="white",
-                bg="red",
-                font=("Helvetica", 48, "bold")
-            )
-            title_label.pack(pady=(0, 20))
-            
-            # Alert message
-            message_label = tk.Label(
-                center_frame,
-                text="MOBILE PHONE DETECTED\nREMOVE DEVICE IMMEDIATELY",
-                fg="white",
-                bg="red",
-                font=("Helvetica", 28, "bold"),
-                justify=tk.CENTER
-            )
-            message_label.pack(pady=(0, 40))
-            
-            # OK button (initially disabled)
-            self.ok_button = tk.Button(
-                center_frame,
-                text="Device Removed (Disabled)",
-                command=self.hide_mobile_alert,
-                font=("Helvetica", 20, "bold"),
-                bg="darkred",
-                fg="gray",
-                width=25,
-                height=3,
-                relief="sunken",
-                bd=3,
-                state=tk.DISABLED
-            )
-            self.ok_button.pack(pady=20)
-            
-            # System info
-            sys_info = SecurityUtils.get_system_info()
-            info_text = f"System: {sys_info['computer_name']} | User: {sys_info['username']} | IP: {sys_info['ip_address']}\nTime: {sys_info['timestamp']}"
+            main_label.pack(expand=True, pady=(50, 20))
+
+            # System information display
+            info_text = f"""COMPUTER DETAILS:
+        Computer: {sys_info['computer_name']}
+        IP Address: {sys_info['ip_address']}
+        User: {sys_info['username']}
+        Time: {sys_info['timestamp']}
+
+System locked due to mobile phone detection"""
+
             info_label = tk.Label(
-                center_frame,
+                self.alert_window,
                 text=info_text,
-                fg="white",
+                fg="yellow",
                 bg="red",
-                font=("Courier", 14, "bold")
+                font=("Courier", 20, "bold"),
+                justify="left"
             )
-            info_label.pack(pady=(40, 20))
+            info_label.pack(pady=20)
+
+            # Button to close the alert
+            self.ok_button = tk.Button(
+                self.alert_window, 
+                text="OK (Mobile Detected - Cannot Close)",
+                state="disabled", 
+                command=self.hide_mobile_alert, 
+                font=("Helvetica", 20, "bold"),
+                bg="white",
+                fg="red",
+                wraplength=600
+            )
+            self.ok_button.pack(pady=50)
 
         # Show the alert window
         self.alert_window.deiconify()
-        self.alert_window.lift()
+        self.alert_window.lift()  # Bring to front
         self.alert_window.attributes("-topmost", True)
         self.alert_window.protocol("WM_DELETE_WINDOW", lambda: None)
         self.alert_active = True
         
         # Log alert creation
-        SecurityUtils.log_security_event("SECURITY_ALERT_CREATED", "Full-screen security alert created and displayed")
+        SecurityUtils.log_security_event("SECURITY_ALERT_CREATED", f"Full-screen security alert created and displayed")
 
     def hide_mobile_alert(self):
         """Hide the mobile alert window only if mobile is not detected for consecutive frames."""
         if self.alert_window is not None:
-            self.alert_window.withdraw()
+            self.alert_window.withdraw()  # Hide the alert window
+            self.alert_window.attributes("-topmost", False)  # Remove topmost attribute
             self.alert_active = False
-            SecurityUtils.log_security_event("SECURITY_ALERT_DISMISSED", "Security alert dismissed - mobile device removed")
+            SecurityUtils.log_security_event("SECURITY_ALERT_CLOSED", f"Alert closed by user after {Config.CONSECUTIVE_MAX_DETECTIONS} consecutive clear frames")
+            print("Alert closed - no mobile detected for 3 consecutive frames")
 
     def show_mobile_alert_in_thread(self):
         """Show mobile alert in a thread-safe manner."""
         if self.alert_active:
-            return
+            return  # Already active
         if self.alert_window is not None and self.alert_window.winfo_exists():
-            self.alert_window.deiconify()
+            try:
+                if self.alert_window.state() == "withdrawn":
+                    # If the window exists and is hidden, just show it again
+                    self.alert_window.deiconify()
+                    self.alert_window.lift()
+                    self.alert_window.attributes("-topmost", True)
+                    self.alert_active = True
+                    SecurityUtils.log_security_event("SECURITY_ALERT_REAPPEARED", "Alert window reappeared - mobile phone detected again")
+            except tk.TclError:
+                # Window doesn't exist anymore, create new one
+                self.alert_window = None
+                self.show_mobile_alert()
         else:
+            # Create and show the alert window
             self.show_mobile_alert()
 
     def update_mobile_alert_button(self, consecutive_misses):
         """Update the mobile alert button based on consecutive misses."""
         if hasattr(self, 'ok_button') and self.ok_button is not None:
-            if consecutive_misses >= 3:  # Enable button after 3 consecutive misses
-                self.ok_button.config(
-                    text="✓ Device Removed - Click to Continue",
-                    bg="green",
-                    fg="white",
-                    state=tk.NORMAL,
-                    relief="raised"
-                )
+            if consecutive_misses >= Config.CONSECUTIVE_MAX_DETECTIONS:
+                self.ok_button.config(state='normal', text='OK (No Mobile Detected - Safe to Close)')
+            elif consecutive_misses > 0:
+                remaining = Config.CONSECUTIVE_MAX_DETECTIONS - consecutive_misses
+                self.ok_button.config(state='disabled', text=f'OK ({remaining} more needed)')
             else:
-                self.ok_button.config(
-                    text=f"Device Removed (Wait {3-consecutive_misses} more checks)",
-                    bg="darkred",
-                    fg="gray",
-                    state=tk.DISABLED,
-                    relief="sunken"
-                )
+                self.ok_button.config(state='disabled', text='OK (Mobile Detected)')
 
     def show_camera_alert(self):
         """Display camera unavailable alert."""
         self.create_root()
 
         if self.camera_alert_window is None:
+            sys_info = SecurityUtils.get_system_info()
+            
             self.camera_alert_window = tk.Toplevel(self.root)
-            self.camera_alert_window.title("CAMERA ERROR")
+            self.camera_alert_window.title("Camera Required")
             self.camera_alert_window.attributes("-fullscreen", True)
             self.camera_alert_window.attributes("-topmost", True)
+            
+            screen_width = self.root.winfo_screenwidth()
+            screen_height = self.root.winfo_screenheight()
+            self.camera_alert_window.geometry(f"{screen_width}x{screen_height}+0+0")
             self.camera_alert_window.configure(bg='orange')
             self.camera_alert_window.resizable(False, False)
-            self.camera_alert_window.protocol("WM_DELETE_WINDOW", lambda: None)
-            
-            # Center frame
-            center_frame = tk.Frame(self.camera_alert_window, bg='orange')
-            center_frame.pack(expand=True)
-            
-            # Camera icon
-            camera_label = tk.Label(
-                center_frame,
-                text="📷",
+
+            # Main alert message
+            main_label = tk.Label(
+                self.camera_alert_window,
+                text="CAMERA ACCESS REQUIRED",
                 fg="white",
                 bg="orange",
-                font=("Helvetica", 100, "bold")
+                font=("Helvetica", 30, "bold")
             )
-            camera_label.pack(pady=(50, 20))
-            
-            # Alert title
-            title_label = tk.Label(
-                center_frame,
-                text="CAMERA UNAVAILABLE",
-                fg="white",
+            main_label.pack(expand=True, pady=(50, 20))
+
+            # Instructions
+            instruction_text = """Please ensure your camera is:
+• Connected and powered on
+• Not being used by another application
+• Granted permission to this application
+
+System monitoring requires camera access for security compliance."""
+
+            instruction_label = tk.Label(
+                self.camera_alert_window,
+                text=instruction_text,
+                fg="black",
                 bg="orange",
-                font=("Helvetica", 36, "bold")
+                font=("Arial", 18),
+                justify="left"
             )
-            title_label.pack(pady=(0, 20))
-            
-            # Alert message
-            message_label = tk.Label(
-                center_frame,
-                text="Please check camera connection\nand restart the application",
-                fg="white",
+            instruction_label.pack(pady=20)
+
+            # System info
+            info_text = f"""SYSTEM INFORMATION:
+Computer: {sys_info['computer_name']}
+IP Address: {sys_info['ip_address']}
+User: {sys_info['username']}
+Time: {sys_info['timestamp']}"""
+
+            info_label = tk.Label(
+                self.camera_alert_window,
+                text=info_text,
+                fg="darkred",
                 bg="orange",
-                font=("Helvetica", 24),
-                justify=tk.CENTER
+                font=("Courier", 14, "bold"),
+                justify="left"
             )
-            message_label.pack(pady=(0, 40))
-            
-            # Retry button
+            info_label.pack(pady=20)
+
+            # Retry button - callback will be set by the calling code
             self.retry_button = tk.Button(
-                center_frame,
-                text="🔄 Retry Camera Connection",
-                command=self.hide_camera_alert,
-                font=("Helvetica", 18, "bold"),
-                bg="darkorange",
+                self.camera_alert_window,
+                text="Retry Camera Connection",
+                font=("Helvetica", 16, "bold"),
+                bg="green",
                 fg="white",
-                width=25,
-                height=3,
-                relief="raised",
-                bd=3
+                width=25
             )
-            self.retry_button.pack(pady=20)
+            self.retry_button.pack(pady=30)
 
         self.camera_alert_window.deiconify()
         self.camera_alert_window.lift()
@@ -267,7 +247,9 @@ class AlertSystem(BaseAlert):
         """Hide camera alert."""
         if self.camera_alert_window is not None:
             self.camera_alert_window.withdraw()
+            self.camera_alert_window.attributes("-topmost", False)
             self.camera_alert_active = False
+            SecurityUtils.log_security_event("CAMERA_ALERT_CLOSED", "Camera alert closed - camera available")
 
     def show_recording_alert(self, detected_tools):
         """Display an alert for screen recording tool detection."""
@@ -275,331 +257,516 @@ class AlertSystem(BaseAlert):
 
         # Check if we're in grace period - don't show alert during grace period
         if self.is_recording_grace_period_active():
+            remaining_time = Config.RECORDING_GRACE_PERIOD - (time.time() - self.recording_grace_start_time)
+            SecurityUtils.log_security_event("RECORDING_ALERT_SUPPRESSED_GRACE", f"Recording alert suppressed - {remaining_time:.0f}s grace period remaining")
             return
 
-        self.force_show_recording_alert(detected_tools)
-
-    def force_show_recording_alert(self, detected_tools):
-        """Force show recording alert bypassing grace period check."""
         if self.recording_alert_window is None:
+            sys_info = SecurityUtils.get_system_info()
+            
             self.recording_alert_window = tk.Toplevel(self.root)
-            self.recording_alert_window.title("RECORDING DETECTION")
+            self.recording_alert_window.title("Recording Detection Alert")
             self.recording_alert_window.attributes("-fullscreen", True)
             self.recording_alert_window.attributes("-topmost", True)
+            
+            screen_width = self.root.winfo_screenwidth()
+            screen_height = self.root.winfo_screenheight()
+            self.recording_alert_window.geometry(f"{screen_width}x{screen_height}+0+0")
             self.recording_alert_window.configure(bg='darkred')
             self.recording_alert_window.resizable(False, False)
-            self.recording_alert_window.protocol("WM_DELETE_WINDOW", lambda: None)
-            
-            # Disable escape key
-            self.recording_alert_window.bind('<Escape>', lambda e: None)
-            
-            # Center frame
-            center_frame = tk.Frame(self.recording_alert_window, bg='darkred')
-            center_frame.pack(expand=True)
-            
-            # Warning symbol
-            warning_label = tk.Label(
-                center_frame,
-                text="🎥",
-                fg="white",
-                bg="darkred",
-                font=("Helvetica", 100, "bold")
-            )
-            warning_label.pack(pady=(30, 15))
-            
-            # Alert title
-            title_label = tk.Label(
-                center_frame,
-                text="SCREEN RECORDING DETECTED",
+
+            # Main alert message
+            main_label = tk.Label(
+                self.recording_alert_window,
+                text="⚠️ SCREEN RECORDING DETECTED ⚠️",
                 fg="white",
                 bg="darkred",
                 font=("Helvetica", 32, "bold")
             )
-            title_label.pack(pady=(0, 15))
-            
-            # Tools detected label
-            self.tools_label = tk.Label(
-                center_frame,
-                text="",
+            main_label.pack(expand=True, pady=(50, 20))
+
+            # Secondary message in Arabic
+            arabic_label = tk.Label(
+                self.recording_alert_window,
+                text="تم اكتشاف تطبيق تسجيل الشاشة - الرجاء إغلاق جميع تطبيقات التسجيل",
                 fg="yellow",
                 bg="darkred",
-                font=("Helvetica", 18, "bold"),
-                justify=tk.CENTER
+                font=("Helvetica", 24, "bold"),
+                wraplength=screen_width - 100
             )
-            self.tools_label.pack(pady=(0, 20))
-            
-            # Instructions
-            instructions_label = tk.Label(
-                center_frame,
-                text="CLOSE ALL RECORDING APPLICATIONS\nENTER SECURITY PASSWORD TO CONTINUE",
+            arabic_label.pack(pady=20)
+
+            # Detected tools display
+            tools_text = f"Detected Tools: {', '.join(detected_tools)}"
+            self.tools_label = tk.Label(
+                self.recording_alert_window,
+                text=tools_text,
+                fg="orange",
+                bg="darkred",
+                font=("Courier", 18, "bold"),
+                wraplength=screen_width - 100
+            )
+            self.tools_label.pack(pady=20)
+
+            # System information
+            info_text = f"""SECURITY VIOLATION DETECTED:
+Computer: {sys_info['computer_name']}
+IP Address: {sys_info['ip_address']}
+User: {sys_info['username']}
+Time: {sys_info['timestamp']}"""
+
+            info_label = tk.Label(
+                self.recording_alert_window,
+                text=info_text,
                 fg="white",
                 bg="darkred",
-                font=("Helvetica", 20, "bold"),
-                justify=tk.CENTER
+                font=("Courier", 16, "bold"),
+                justify="left"
             )
-            instructions_label.pack(pady=(0, 20))
-            
-            # Enter Password button
-            password_button = tk.Button(
-                center_frame,
-                text="🔓 Enter Security Password",
-                command=self.show_password_entry_dialog,
-                font=("Helvetica", 16, "bold"),
-                bg="darkblue",
-                fg="white",
-                width=25,
-                height=2,
-                relief="raised",
-                bd=3
-            )
-            password_button.pack(pady=10)
+            info_label.pack(pady=20)
 
-        # Update detected tools display
-        self.update_recording_tools_display(detected_tools)
-        
-        # Show the window
+            # Close button - now requires password
+            close_button = tk.Button(
+                self.recording_alert_window,
+                text="Enter Security Password to Continue",
+                command=self.show_password_entry_dialog,
+                font=("Helvetica", 18, "bold"),
+                bg="yellow",
+                fg="black",
+                width=35,
+                height=2
+            )
+            close_button.pack(pady=30)
+            
+            # Warning about password
+            password_warning = tk.Label(
+                self.recording_alert_window,
+                text="⚠️ Security password required to dismiss this alert ⚠️",
+                fg="yellow",
+                bg="darkred",
+                font=("Helvetica", 16, "bold")
+            )
+            password_warning.pack(pady=10)
+            
+            # Grace period information
+            grace_info = tk.Label(
+                self.recording_alert_window,
+                text=f"After password verification: {Config.RECORDING_GRACE_PERIOD} seconds to close recording apps",
+                fg="cyan",
+                bg="darkred",
+                font=("Helvetica", 14, "bold")
+            )
+            grace_info.pack(pady=5)
+
+        # Show the recording alert window
         self.recording_alert_window.deiconify()
         self.recording_alert_window.lift()
         self.recording_alert_window.attributes("-topmost", True)
+        self.recording_alert_window.protocol("WM_DELETE_WINDOW", lambda: None)
         self.recording_alert_active = True
         
-        SecurityUtils.log_security_event("RECORDING_ALERT_SHOWN", f"Recording alert displayed for tools: {detected_tools}")
+        # Update detected tools display if alert was already created
+        if hasattr(self, 'tools_label') and self.tools_label is not None:
+            self.update_recording_tools_display(detected_tools)
+        
+        SecurityUtils.log_security_event("RECORDING_ALERT_SHOWN", f"Screen recording alert displayed for tools: {', '.join(detected_tools)}")
+
+    def force_show_recording_alert(self, detected_tools):
+        """Force show recording alert bypassing grace period checks."""
+        
+        # Log the force show event
+        SecurityUtils.log_security_event("RECORDING_ALERT_FORCE_SHOW", f"Force showing recording alert for tools: {', '.join(detected_tools)}")
+        
+        if self.recording_alert_window is not None and self.recording_alert_window.winfo_exists():
+            try:
+                if self.recording_alert_window.state() == "withdrawn":
+                    # If the window exists and is hidden, just show it again
+                    self.recording_alert_window.deiconify()
+                    self.recording_alert_window.lift()
+                    self.recording_alert_window.attributes("-topmost", True)
+                    self.recording_alert_active = True
+                    self.update_recording_tools_display(detected_tools)
+                    SecurityUtils.log_security_event("RECORDING_ALERT_REAPPEARED", f"Recording alert forcibly reappeared - tools still detected: {', '.join(detected_tools)}")
+                else:
+                    # Alert is already visible, just update tools
+                    self.update_recording_tools_display(detected_tools)
+            except tk.TclError:
+                # Window doesn't exist anymore, create new one
+                self.recording_alert_window = None
+                self.show_recording_alert(detected_tools)
+        else:
+            # Create and show the alert window
+            self.show_recording_alert(detected_tools)
 
     def show_recording_alert_in_thread(self, detected_tools):
         """Show recording alert in a thread-safe manner."""
-        if not self.recording_alert_active:
-            threading.Thread(target=lambda: self.show_recording_alert(detected_tools), daemon=True).start()
+        
+        # Check if we're in grace period
+        if self.is_recording_grace_period_active():
+            remaining_time = Config.RECORDING_GRACE_PERIOD - (time.time() - self.recording_grace_start_time)
+            SecurityUtils.log_security_event("RECORDING_ALERT_SUPPRESSED_GRACE", f"Recording alert suppressed - {remaining_time:.0f}s grace period remaining")
+            return
+            
+        if self.recording_alert_active:
+            # Update tools display if alert is already active
+            self.update_recording_tools_display(detected_tools)
+            return
+            
+        if self.recording_alert_window is not None and self.recording_alert_window.winfo_exists():
+            try:
+                if self.recording_alert_window.state() == "withdrawn":
+                    # If the window exists and is hidden, just show it again
+                    self.recording_alert_window.deiconify()
+                    self.recording_alert_window.lift()
+                    self.recording_alert_window.attributes("-topmost", True)
+                    self.recording_alert_active = True
+                    self.update_recording_tools_display(detected_tools)
+                    SecurityUtils.log_security_event("RECORDING_ALERT_REAPPEARED", f"Recording alert reappeared - tools still detected: {', '.join(detected_tools)}")
+            except tk.TclError:
+                # Window doesn't exist anymore, create new one
+                self.recording_alert_window = None
+                self.show_recording_alert(detected_tools)
+        else:
+            # Create and show the alert window
+            self.show_recording_alert(detected_tools)
 
     def hide_recording_alert(self):
-        """Hide recording alert."""
+        """Hide the recording alert window after password verification."""
         if self.recording_alert_window is not None:
             self.recording_alert_window.withdraw()
+            self.recording_alert_window.attributes("-topmost", False)
             self.recording_alert_active = False
-            SecurityUtils.log_security_event("RECORDING_ALERT_DISMISSED", "Recording alert dismissed")
+            
+            # Start grace period to allow user to close recording apps
+            self.start_recording_grace_period()
+            
+            SecurityUtils.log_security_event("RECORDING_ALERT_CLOSED", "Recording alert closed after password verification - grace period started")
 
     def show_password_entry_dialog(self):
-        """Show password entry dialog."""
+        """Show password entry dialog for recording alert dismissal"""
         if self.password_entry_window is not None:
             return  # Already showing
             
+        self.create_root()
+        
         self.password_entry_window = tk.Toplevel(self.root)
-        self.password_entry_window.title("Security Password")
-        self.password_entry_window.geometry("500x300")
-        self.password_entry_window.configure(bg='black')
+        self.password_entry_window.title("Security Verification Required")
         self.password_entry_window.attributes("-topmost", True)
+        self.password_entry_window.attributes("-fullscreen", True)
+        self.password_entry_window.configure(bg='black')
         self.password_entry_window.resizable(False, False)
-        self.password_entry_window.protocol("WM_DELETE_WINDOW", self.close_password_dialog)
+        self.password_entry_window.protocol("WM_DELETE_WINDOW", lambda: None)  # Prevent closing
         
-        # Center the window
-        self.password_entry_window.transient(self.recording_alert_window)
-        self.password_entry_window.grab_set()
+        # Center the dialog content
+        main_frame = tk.Frame(self.password_entry_window, bg='black')
+        main_frame.pack(expand=True)
         
-        # Center frame
-        center_frame = tk.Frame(self.password_entry_window, bg='black')
-        center_frame.pack(expand=True)
+        # Security warning
+        warning_label = tk.Label(
+            main_frame,
+            text="🔒 SECURITY VERIFICATION REQUIRED 🔒",
+            fg="red",
+            bg="black",
+            font=("Helvetica", 36, "bold")
+        )
+        warning_label.pack(pady=(50, 30))
         
-        # Title
-        title_label = tk.Label(
-            center_frame,
-            text="🔐 SECURITY AUTHENTICATION",
+        # Violation message
+        violation_text = f"""SECURITY VIOLATION DETECTED
+Screen recording/capture attempt blocked
+Administrator password required to continue
+
+After password verification, you will have {Config.RECORDING_GRACE_PERIOD} seconds
+to close all recording applications before the alert reappears."""
+
+        violation_label = tk.Label(
+            main_frame,
+            text=violation_text,
             fg="white",
             bg="black",
-            font=("Helvetica", 16, "bold")
+            font=("Helvetica", 18, "bold"),
+            justify="center"
         )
-        title_label.pack(pady=(20, 15))
+        violation_label.pack(pady=20)
         
-        # Password label
+        # Attempts remaining
+        attempts_remaining = Config.MAX_PASSWORD_ATTEMPTS - self.security_utils.password_attempts
+        self.attempts_label = tk.Label(
+            main_frame,
+            text=f"Attempts remaining: {attempts_remaining}",
+            fg="yellow",
+            bg="black",
+            font=("Helvetica", 18, "bold")
+        )
+        self.attempts_label.pack(pady=10)
+        
+        # Password entry frame
+        password_frame = tk.Frame(main_frame, bg='black')
+        password_frame.pack(pady=30)
+        
         password_label = tk.Label(
-            center_frame,
-            text="Enter Security Password:",
+            password_frame,
+            text="Security Password:",
             fg="white",
             bg="black",
-            font=("Helvetica", 12)
+            font=("Helvetica", 18, "bold")
         )
-        password_label.pack(pady=(0, 10))
+        password_label.pack(pady=10)
         
-        # Password entry
         self.password_entry = tk.Entry(
-            center_frame,
+            password_frame,
             show="*",
-            font=("Helvetica", 14),
-            width=20,
-            justify=tk.CENTER
+            font=("Helvetica", 16),
+            width=30,
+            justify="center"
         )
-        self.password_entry.pack(pady=5)
+        self.password_entry.pack(pady=10)
         self.password_entry.focus_set()
         
-        # Bind Enter key
+        # Bind Enter key to password verification
         self.password_entry.bind('<Return>', lambda e: self.verify_password_and_close())
         
         # Buttons frame
-        buttons_frame = tk.Frame(center_frame, bg='black')
-        buttons_frame.pack(pady=20)
+        button_frame = tk.Frame(main_frame, bg='black')
+        button_frame.pack(pady=30)
         
-        # Submit button
-        submit_button = tk.Button(
-            buttons_frame,
-            text="✓ Submit",
+        verify_button = tk.Button(
+            button_frame,
+            text="Verify Password",
             command=self.verify_password_and_close,
-            font=("Helvetica", 12, "bold"),
+            font=("Helvetica", 16, "bold"),
             bg="green",
             fg="white",
-            width=10
+            width=15,
+            height=2
         )
-        submit_button.pack(side=tk.LEFT, padx=10)
+        verify_button.pack(side="left", padx=10)
         
-        # Hint button
         hint_button = tk.Button(
-            buttons_frame,
-            text="💡 Hint",
+            button_frame,
+            text="Show Hint",
             command=self.show_password_hint,
-            font=("Helvetica", 12, "bold"),
+            font=("Helvetica", 16, "bold"),
             bg="blue",
             fg="white",
-            width=10
+            width=15,
+            height=2
         )
-        hint_button.pack(side=tk.LEFT, padx=10)
+        hint_button.pack(side="left", padx=10)
         
-        # Cancel button
-        cancel_button = tk.Button(
-            buttons_frame,
-            text="✗ Cancel",
-            command=self.close_password_dialog,
-            font=("Helvetica", 12, "bold"),
-            bg="red",
-            fg="white",
-            width=10
-        )
-        cancel_button.pack(side=tk.LEFT, padx=10)
+        # System info
+        sys_info = SecurityUtils.get_system_info()
+        info_text = f"""SYSTEM LOCKED:
+Computer: {sys_info['computer_name']} | IP: {sys_info['ip_address']}
+User: {sys_info['username']} | Time: {sys_info['timestamp']}"""
         
-        # Attempts label
-        self.attempts_label = tk.Label(
-            center_frame,
-            text="",
-            fg="red",
+        info_label = tk.Label(
+            main_frame,
+            text=info_text,
+            fg="gray",
             bg="black",
-            font=("Helvetica", 10)
+            font=("Courier", 12),
+            justify="center"
         )
-        self.attempts_label.pack(pady=(10, 0))
+        info_label.pack(pady=(50, 20))
+        
+        SecurityUtils.log_security_event("PASSWORD_DIALOG_SHOWN", "Security password dialog displayed")
 
     def verify_password_and_close(self):
-        """Verify password and close dialog if correct."""
-        if self.password_entry is None:
+        """Verify entered password and close dialog if correct"""
+        if not hasattr(self, 'password_entry') or self.password_entry is None:
             return
             
         entered_password = self.password_entry.get()
+        self.security_utils.password_attempts += 1
         
         if self.security_utils.verify_password(entered_password):
-            # Password correct - start grace period
-            self.start_recording_grace_period()
+            # Correct password
+            SecurityUtils.log_security_event("PASSWORD_VERIFIED", "Security password verified successfully")
             self.close_password_dialog()
             self.hide_recording_alert()
-            SecurityUtils.log_security_event("RECORDING_PASSWORD_SUCCESS", "Recording alert password verification successful")
+            self.start_recording_grace_period() # Start grace period
+            self.security_utils.password_attempts = 0  # Reset attempts
         else:
-            # Password incorrect
-            self.security_utils.password_attempts += 1
-            remaining = Config.MAX_PASSWORD_ATTEMPTS - self.security_utils.password_attempts
+            # Incorrect password
+            attempts_remaining = Config.MAX_PASSWORD_ATTEMPTS - self.security_utils.password_attempts
             
-            if remaining > 0:
-                self.attempts_label.config(text=f"Incorrect password. {remaining} attempts remaining.")
-                self.password_entry.delete(0, tk.END)
-                self.password_entry.focus_set()
-            else:
+            if attempts_remaining <= 0:
+                # Maximum attempts reached
+                SecurityUtils.log_security_event("PASSWORD_MAX_ATTEMPTS", "Maximum password attempts reached - system locked")
                 self.handle_max_password_attempts()
+            else:
+                # Flash red and show remaining attempts
+                self.password_entry_window.configure(bg='darkred')
+                self.password_entry.delete(0, tk.END)
+                
+                # Update attempts remaining label
+                self.attempts_label.config(text=f"Attempts remaining: {attempts_remaining}", fg="red")
+                
+                # Flash back to black
+                self.root.after(1000, lambda: self.password_entry_window.configure(bg='black'))
 
     def show_password_hint(self):
-        """Show password hint."""
+        """Show encrypted password hint"""
         hint = self.security_utils.get_security_password_hint()
-        messagebox.showinfo("Password Hint", hint, parent=self.password_entry_window)
+        
+        hint_window = tk.Toplevel(self.password_entry_window)
+        hint_window.title("Password Hint")
+        hint_window.attributes("-topmost", True)
+        hint_window.configure(bg='darkblue')
+        hint_window.geometry("600x300")
+        hint_window.resizable(False, False)
+        
+        hint_label = tk.Label(
+            hint_window,
+            text="PASSWORD HINT:",
+            fg="white",
+            bg="darkblue",
+            font=("Helvetica", 16, "bold")
+        )
+        hint_label.pack(pady=20)
+        
+        hint_text_label = tk.Label(
+            hint_window,
+            text=hint,
+            fg="yellow",
+            bg="darkblue",
+            font=("Helvetica", 12),
+            wraplength=550,
+            justify="center"
+        )
+        hint_text_label.pack(pady=20)
+        
+        close_hint_button = tk.Button(
+            hint_window,
+            text="Close Hint",
+            command=hint_window.destroy,
+            font=("Helvetica", 12, "bold"),
+            bg="white",
+            fg="darkblue"
+        )
+        close_hint_button.pack(pady=20)
+        
+        SecurityUtils.log_security_event("PASSWORD_HINT_REQUESTED", "User requested password hint")
 
     def handle_max_password_attempts(self):
-        """Handle maximum password attempts exceeded."""
-        SecurityUtils.log_security_event("MAX_PASSWORD_ATTEMPTS", "Maximum password attempts exceeded")
-        self.close_password_dialog()
-        messagebox.showerror(
-            "Security Violation", 
-            "Maximum password attempts exceeded.\nContact system administrator.",
-            parent=self.recording_alert_window
-        )
+        """Handle maximum password attempts reached"""
+        # Update the dialog to show system locked
+        if self.password_entry_window:
+            for widget in self.password_entry_window.winfo_children():
+                widget.destroy()
+            
+            # Show locked message
+            locked_label = tk.Label(
+                self.password_entry_window,
+                text="🔒 SYSTEM PERMANENTLY LOCKED 🔒",
+                fg="red",
+                bg="black",
+                font=("Helvetica", 48, "bold")
+            )
+            locked_label.pack(expand=True)
+            
+            message_label = tk.Label(
+                self.password_entry_window,
+                text="Maximum password attempts exceeded\nContact system administrator immediately\nAll activities are being logged",
+                fg="white",
+                bg="black",
+                font=("Helvetica", 20, "bold"),
+                justify="center"
+            )
+            message_label.pack(pady=50)
+        
+        # Log critical security event
+        SecurityUtils.log_security_event("CRITICAL_SECURITY_BREACH", "Maximum password attempts exceeded - system locked permanently")
 
     def close_password_dialog(self):
-        """Close password entry dialog."""
+        """Close the password entry dialog"""
         if self.password_entry_window is not None:
             self.password_entry_window.destroy()
             self.password_entry_window = None
             self.password_entry = None
 
     def is_recording_grace_period_active(self):
-        """Check if recording grace period is active."""
+        """Check if we're currently in the grace period after password entry."""
         if not self.recording_grace_active:
             return False
-        
-        elapsed = time.time() - self.recording_grace_start_time
-        if elapsed >= Config.RECORDING_GRACE_PERIOD:
+
+        current_time = time.time()
+        if current_time - self.recording_grace_start_time > Config.RECORDING_GRACE_PERIOD:
+            # Grace period expired
             self.recording_grace_active = False
+            SecurityUtils.log_security_event("RECORDING_GRACE_PERIOD_EXPIRED", f"Recording grace period of {Config.RECORDING_GRACE_PERIOD} seconds has expired")
             return False
         
         return True
 
     def start_recording_grace_period(self):
-        """Start the recording grace period."""
+        """Start the grace period after password verification."""
         self.recording_grace_start_time = time.time()
         self.recording_grace_active = True
-        SecurityUtils.log_security_event("RECORDING_GRACE_PERIOD_START", 
-                                       f"Recording grace period started for {Config.RECORDING_GRACE_PERIOD} seconds")
+        SecurityUtils.log_security_event("RECORDING_GRACE_PERIOD_STARTED", f"Grace period of {Config.RECORDING_GRACE_PERIOD} seconds started for recording app closure")
 
     def get_grace_period_status(self):
-        """Get grace period status for debugging."""
+        """Get grace period status information."""
+        if not self.recording_grace_active:
+            return "No active grace period"
+
+        current_time = time.time()
+        remaining_time = Config.RECORDING_GRACE_PERIOD - (current_time - self.recording_grace_start_time)
+        
+        if remaining_time <= 0:
+            self.recording_grace_active = False
+            return "Grace period expired"
+        
+        return f"Grace period: {remaining_time:.0f}s remaining to close recording apps"
+
+    def get_grace_period_debug_info(self):
+        """Get detailed grace period debug information."""
         if not self.recording_grace_active:
             return "Grace period not active"
         
-        elapsed = time.time() - self.recording_grace_start_time
+        current_time = time.time()
+        elapsed = current_time - self.recording_grace_start_time
         remaining = Config.RECORDING_GRACE_PERIOD - elapsed
-        return f"Grace period active: {remaining:.1f}s remaining"
-
-    def get_grace_period_debug_info(self):
-        """Get detailed grace period information for debugging."""
+        
         return {
             'active': self.recording_grace_active,
             'start_time': self.recording_grace_start_time,
-            'current_time': time.time(),
-            'elapsed': time.time() - self.recording_grace_start_time if self.recording_grace_active else 0,
-            'remaining': Config.RECORDING_GRACE_PERIOD - (time.time() - self.recording_grace_start_time) if self.recording_grace_active else 0
+            'current_time': current_time,
+            'elapsed': elapsed,
+            'remaining': remaining,
+            'expired': remaining <= 0,
+            'grace_period_duration': Config.RECORDING_GRACE_PERIOD
         }
 
     def update_recording_tools_display(self, tools):
-        """Update the display of detected recording tools."""
-        if self.tools_label is not None:
-            if tools:
-                tools_text = "Detected Tools:\n" + "\n".join(f"• {tool}" for tool in tools)
-            else:
-                tools_text = "No active recording tools detected"
-            self.tools_label.config(text=tools_text)
+        """Update the detected tools display in recording alert."""
+        if hasattr(self, 'tools_label') and self.tools_label is not None:
+            self.tools_label.config(text=f"Detected Tools: {', '.join(tools)}")
 
     def update_tkinter(self):
-        """Update Tkinter GUI - call this regularly from main loop."""
+        """Update Tkinter to keep GUI responsive."""
         if self.root is not None:
             try:
-                self.root.update_idletasks()
                 self.root.update()
             except tk.TclError:
-                pass  # Window might be destroyed
+                pass  # Prevent crash if window closed
 
     def check_and_reshow_recording_alert_if_needed(self, detected_tools):
         """Check if recording alert should be reshown after grace period expires."""
         if (not self.recording_alert_active and 
             not self.is_recording_grace_period_active() and 
-            detected_tools):
+            detected_tools and 
+            not self.alert_active):  # Don't interfere with mobile alerts
+            
+            SecurityUtils.log_security_event("RECORDING_ALERT_GRACE_EXPIRED", f"Grace period expired, recording tools still detected: {', '.join(detected_tools)}")
             self.show_recording_alert_in_thread(detected_tools)
+            return True
+        return False
 
     def verify_password(self, username, password):
-        """Verify password using LDAP authentication."""
-        try:
-            success, result = self.ldap.authenticate({
-                'username': username,
-                'password': password
-            })
-            return success
-        except Exception as e:
-            print(f"Password verification error: {e}")
-            return False
+        # Replace your local password check with:
+        success, role = self.ldap.authenticate(username, password)
+        if success:
+            return True, role
+        return False, "Invalid credentials"

@@ -4,7 +4,7 @@ Main Authentication Manager
 
 import queue
 import threading
-import tkinter as tk
+import mttkinter.mtTkinter as tk
 from typing import Optional, Tuple, Dict, Any
 
 from ..core.config import Config
