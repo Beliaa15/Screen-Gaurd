@@ -766,3 +766,110 @@ class DeepFaceAuthenticator(BaseAuthenticator):
         except Exception as e:
             print(f"Error getting user info: {e}")
             return None
+
+    def create_ldap_user_with_face(self, username: str, first_name: str = "", last_name: str = "", 
+                                  email: str = "", role: str = "user", image_path: str = None,
+                                  temp_password: str = None) -> Tuple[bool, str]:
+        """
+        Create a new LDAP user and register their face simultaneously.
+        
+        Args:
+            username: Username for the new user
+            first_name: First name of the user
+            last_name: Last name of the user
+            email: Email address of the user
+            role: Role/group for the user (admin, operator, user)
+            image_path: Path to face image, or None to capture from camera
+            temp_password: Temporary password, or None to generate one
+            
+        Returns:
+            Tuple of (success, message/temporary_password)
+        """
+        try:
+            # Initialize LDAP authenticator
+            ldap_auth = LDAPAuthenticator()
+            
+            # Check if LDAP is available
+            if not ldap_auth.is_available():
+                return False, "LDAP server is not available"
+            
+            # Generate temporary password if not provided
+            if not temp_password:
+                temp_password = ldap_auth.generate_temporary_password()
+            
+            # Create LDAP user first
+            ldap_success, ldap_message = ldap_auth.create_user(
+                username=username,
+                password=temp_password,
+                first_name=first_name,
+                last_name=last_name,
+                email=email,
+                role=role
+            )
+            
+            if not ldap_success:
+                return False, f"Failed to create LDAP user: {ldap_message}"
+            
+            # Register face with the same password
+            face_success = self.register_face(
+                username=username,
+                first_name=first_name,
+                last_name=last_name,
+                email=email,
+                role=role,
+                password=temp_password,
+                image_path=image_path
+            )
+            
+            if not face_success:
+                # If face registration fails, try to clean up LDAP user
+                ldap_auth.delete_user(username)
+                return False, "Failed to register face. LDAP user creation rolled back."
+            
+            SecurityUtils.log_security_event("USER_CREATED_WITH_FACE", 
+                                           f"Created LDAP user with face registration: {username}, role: {role}")
+            
+            return True, f"User '{username}' created successfully. Temporary password: {temp_password}"
+            
+        except Exception as e:
+            SecurityUtils.log_security_event("USER_CREATION_ERROR", 
+                                           f"Error creating user with face: {username}, error: {str(e)}")
+            return False, f"Error creating user: {str(e)}"
+
+    def update_ldap_user_password(self, username: str, new_password: str) -> Tuple[bool, str]:
+        """
+        Update both LDAP password and face registration password.
+        
+        Args:
+            username: Username to update
+            new_password: New password
+            
+        Returns:
+            Tuple of (success, message)
+        """
+        try:
+            # Get current user info
+            user_info = self.get_user_info(username)
+            if not user_info:
+                return False, "User not found in face registration database"
+            
+            # Update face registration with new password
+            face_success = self.register_face(
+                username=username,
+                first_name=user_info.get('first_name', ''),
+                last_name=user_info.get('last_name', ''),
+                email=user_info.get('email', ''),
+                role=user_info.get('role', 'user'),
+                password=new_password
+            )
+            
+            if not face_success:
+                return False, "Failed to update face registration password"
+            
+            SecurityUtils.log_security_event("PASSWORD_UPDATED", 
+                                           f"Updated password for user: {username}")
+            
+            return True, f"Password updated successfully for user '{username}'"
+            
+        except Exception as e:
+            return False, f"Error updating password: {str(e)}"

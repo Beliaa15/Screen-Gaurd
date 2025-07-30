@@ -812,7 +812,7 @@ class SecurityGUI:
             threading.Thread(target=ldap_auth_thread, daemon=True).start()
         
         def cancel_auth():
-            self.show_auth_selection()
+            self.show_method_selection()
         
         # Login button
         login_btn = tk.Button(
@@ -1150,6 +1150,33 @@ class SecurityGUI:
             height=2
         ).pack(pady=10, padx=10, side='left')
         
+        # LDAP User Creation Section
+        ldap_frame = tk.LabelFrame(content_frame, text="LDAP User + Face Registration", 
+                                  font=("Helvetica", 12, "bold"), fg="cyan", bg="darkblue")
+        ldap_frame.pack(fill='x', pady=10)
+        
+        tk.Button(
+            ldap_frame,
+            text="🆕 Create LDAP User (Camera)",
+            command=self.create_ldap_user_camera,
+            font=("Helvetica", 11, "bold"),
+            bg="darkslategray",
+            fg="white",
+            width=25,
+            height=2
+        ).pack(pady=10, padx=10, side='left')
+        
+        tk.Button(
+            ldap_frame,
+            text="🆕 Create LDAP User (Image)",
+            command=self.create_ldap_user_image,
+            font=("Helvetica", 11, "bold"),
+            bg="steelblue",
+            fg="white",
+            width=25,
+            height=2
+        ).pack(pady=10, padx=10, side='left')
+
         # User Management Section
         user_frame = tk.LabelFrame(content_frame, text="User Management", 
                                   font=("Helvetica", 12, "bold"), fg="lightblue", bg="darkblue")
@@ -1391,17 +1418,8 @@ class SecurityGUI:
                             self.root.after(0, lambda: self.log_user_mgmt_output("   - Check camera permissions"))
                             self.root.after(0, lambda: self.log_user_mgmt_output("   - Try using image registration instead"))
                             
-                            detailed_error = """Face registration failed. Possible causes:
-
-• Camera conflicts with detection system
-• Camera driver issues  
-• Insufficient lighting
-• No face detected in capture
-
-Try:
-1. Stop detection system temporarily
-2. Use 'Register Face (Image)' instead
-3. Ensure good lighting and clear face visibility"""
+                            detailed_error = """Face registration failed. 
+                            Ensure good lighting and clear face visibility"""
                             
                             self.root.after(0, lambda: self.show_custom_dialog("Registration Failed", detailed_error, "error"))
                     except Exception as e:
@@ -1418,14 +1436,7 @@ The camera is likely being used by:
 • Object detection system
 • Another application
 • System monitoring
-
-Solutions:
-1. Temporarily stop the detection system
-2. Close other camera applications  
-3. Use 'Register Face (Image)' as alternative
-4. Restart the application
-
-Technical details: Microsoft Media Foundation (MSMF) conflict detected."""
+"""
                         else:
                             troubleshoot_msg = f"Face Registration Error\n\nError: {str(e)}\n\nPlease try again or use image registration instead."
                         
@@ -1504,7 +1515,7 @@ Technical details: Microsoft Media Foundation (MSMF) conflict detected."""
         
         def list_thread():
             try:
-                users = self.deepface_auth.list_registered_users()
+                users = self.deepface_auth.list_registered_faces()
                 if users:
                     self.root.after(0, lambda: self.log_user_mgmt_output(f"✅ Found {len(users)} registered users:"))
                     for user in users:
@@ -1514,15 +1525,21 @@ Technical details: Microsoft Media Foundation (MSMF) conflict detected."""
                                 user_info += f" - {user['email']}"
                             if user.get('role'):
                                 user_info += f" [{user['role']}]"
+                            # Fix closure issue by capturing user_info in a new scope
+                            self.root.after(0, self._log_user_info, user_info)
                         else:
                             user_info = f"  - {user}"
-                        self.root.after(0, lambda info=user_info: self.log_user_mgmt_output(info))
+                            self.root.after(0, self._log_user_info, user_info)
                 else:
                     self.root.after(0, lambda: self.log_user_mgmt_output("No registered users found."))
             except Exception as e:
                 self.root.after(0, lambda: self.log_user_mgmt_output(f"❌ Error retrieving users: {e}"))
         
         threading.Thread(target=list_thread, daemon=True).start()
+    
+    def _log_user_info(self, user_info):
+        """Helper method to log user info (fixes closure issues)."""
+        self.log_user_mgmt_output(user_info)
     
     def delete_user_face(self):
         """Delete a user's face registration."""
@@ -1538,7 +1555,7 @@ Technical details: Microsoft Media Foundation (MSMF) conflict detected."""
                 
                 def delete_thread():
                     try:
-                        success = self.deepface_auth.delete_user(username)
+                        success = self.deepface_auth.delete_face(username)
                         if success:
                             self.root.after(0, lambda: self.log_user_mgmt_output(f"✅ User {username} deleted successfully"))
                             self.root.after(0, lambda: self.show_custom_dialog("Success", f"User {username} deleted successfully", "info"))
@@ -1621,6 +1638,220 @@ Technical details: Microsoft Media Foundation (MSMF) conflict detected."""
         
         self.show_custom_dialog("LDAP Test", "Enter username:", "info", input_field=True, callback=on_username_input)
     
+    def create_ldap_user_camera(self):
+        """Create LDAP user and register face from camera."""
+        def on_username_input(username):
+            if not username:
+                return
+            
+            def on_first_name_input(first_name):
+                def on_last_name_input(last_name):
+                    def on_email_input(email):
+                        def on_role_selection(role):
+                            if not role:
+                                role = "user"
+                            
+                            self.log_user_mgmt_output(f"Creating LDAP user with face registration: {username}")
+                            self.log_user_mgmt_output(f"Name: {first_name} {last_name}, Role: {role}, Email: {email}")
+                            
+                            def creation_thread():
+                                try:
+                                    success, message = self.deepface_auth.create_ldap_user_with_face(
+                                        username=username,
+                                        first_name=first_name or "",
+                                        last_name=last_name or "",
+                                        email=email or "",
+                                        role=role,
+                                        image_path=None  # Camera capture
+                                    )
+                                    
+                                    if success:
+                                        self.root.after(0, lambda: self.log_user_mgmt_output(f"✅ {message}"))
+                                        self.root.after(0, lambda: self.show_custom_dialog("Success", message, "info"))
+                                    else:
+                                        self.root.after(0, lambda: self.log_user_mgmt_output(f"❌ {message}"))
+                                        self.root.after(0, lambda: self.show_custom_dialog("Error", message, "error"))
+                                except Exception as e:
+                                    error_msg = f"Error creating LDAP user with face: {e}"
+                                    self.root.after(0, lambda: self.log_user_mgmt_output(f"❌ {error_msg}"))
+                                    self.root.after(0, lambda: self.show_custom_dialog("Error", error_msg, "error"))
+                            
+                            threading.Thread(target=creation_thread, daemon=True).start()
+                        
+                        # Role selection dialog
+                        role_options = ["user", "operator", "admin"]
+                        self.show_selection_dialog("Select Role", "Choose user role:", role_options, on_role_selection)
+                    
+                    self.show_custom_dialog("Email", "Enter email address (optional):", "info", input_field=True, callback=on_email_input)
+                
+                self.show_custom_dialog("Last Name", "Enter last name (optional):", "info", input_field=True, callback=on_last_name_input)
+            
+            self.show_custom_dialog("First Name", "Enter first name (optional):", "info", input_field=True, callback=on_first_name_input)
+        
+        self.show_custom_dialog("Create LDAP User", "Enter username:", "info", input_field=True, callback=on_username_input)
+    
+    def create_ldap_user_image(self):
+        """Create LDAP user and register face from image file."""
+        def on_username_input(username):
+            if not username:
+                return
+            
+            def on_first_name_input(first_name):
+                def on_last_name_input(last_name):
+                    def on_email_input(email):
+                        def on_role_selection(role):
+                            if not role:
+                                role = "user"
+                            
+                            def on_image_path_input(image_path):
+                                if not image_path:
+                                    return
+                                
+                                self.log_user_mgmt_output(f"Creating LDAP user with face registration: {username}")
+                                self.log_user_mgmt_output(f"Name: {first_name} {last_name}, Role: {role}, Email: {email}")
+                                self.log_user_mgmt_output(f"Image path: {image_path}")
+                                
+                                def creation_thread():
+                                    try:
+                                        success, message = self.deepface_auth.create_ldap_user_with_face(
+                                            username=username,
+                                            first_name=first_name or "",
+                                            last_name=last_name or "",
+                                            email=email or "",
+                                            role=role,
+                                            image_path=image_path
+                                        )
+                                        
+                                        if success:
+                                            self.root.after(0, lambda: self.log_user_mgmt_output(f"✅ {message}"))
+                                            self.root.after(0, lambda: self.show_custom_dialog("Success", message, "info"))
+                                        else:
+                                            self.root.after(0, lambda: self.log_user_mgmt_output(f"❌ {message}"))
+                                            self.root.after(0, lambda: self.show_custom_dialog("Error", message, "error"))
+                                    except Exception as e:
+                                        error_msg = f"Error creating LDAP user with face: {e}"
+                                        self.root.after(0, lambda: self.log_user_mgmt_output(f"❌ {error_msg}"))
+                                        self.root.after(0, lambda: self.show_custom_dialog("Error", error_msg, "error"))
+                                
+                                threading.Thread(target=creation_thread, daemon=True).start()
+                            
+                            self.show_custom_dialog("Image Path", "Enter full path to image file:", "info", input_field=True, callback=on_image_path_input)
+                        
+                        # Role selection dialog
+                        role_options = ["user", "operator", "admin"]
+                        self.show_selection_dialog("Select Role", "Choose user role:", role_options, on_role_selection)
+                    
+                    self.show_custom_dialog("Email", "Enter email address (optional):", "info", input_field=True, callback=on_email_input)
+                
+                self.show_custom_dialog("Last Name", "Enter last name (optional):", "info", input_field=True, callback=on_last_name_input)
+            
+            self.show_custom_dialog("First Name", "Enter first name (optional):", "info", input_field=True, callback=on_first_name_input)
+        
+        self.show_custom_dialog("Create LDAP User", "Enter username:", "info", input_field=True, callback=on_username_input)
+    
+    def show_selection_dialog(self, title, message, options, callback):
+        """Show a selection dialog with multiple options."""
+        dialog = tk.Toplevel(self.root)
+        dialog.title(title)
+        dialog.geometry("300x250")
+        dialog.configure(bg='#0f1419')
+        dialog.transient(self.root)
+        dialog.grab_set()
+        
+        # Center the dialog
+        dialog.update_idletasks()
+        x = (dialog.winfo_screenwidth() // 2) - (dialog.winfo_width() // 2)
+        y = (dialog.winfo_screenheight() // 2) - (dialog.winfo_height() // 2)
+        dialog.geometry(f"+{x}+{y}")
+        
+        # Message label
+        msg_label = tk.Label(
+            dialog,
+            text=message,
+            fg='white',
+            bg='#0f1419',
+            font=("Segoe UI", 11),
+            wraplength=280
+        )
+        msg_label.pack(pady=20)
+        
+        # Selection variable
+        selection = tk.StringVar(value=options[0] if options else "")
+        
+        # Radio buttons for options
+        for option in options:
+            rb = tk.Radiobutton(
+                dialog,
+                text=option.title(),
+                variable=selection,
+                value=option,
+                fg='white',
+                bg='#0f1419',
+                selectcolor='#4299e1',
+                activebackground='#1a2332',
+                activeforeground='white',
+                font=("Segoe UI", 10)
+            )
+            rb.pack(anchor='w', padx=40, pady=5)
+        
+        # Buttons
+        btn_frame = tk.Frame(dialog, bg='#0f1419')
+        btn_frame.pack(pady=20)
+        
+        def on_confirm():
+            selected = selection.get()
+            dialog.destroy()
+            if callback:
+                callback(selected)
+        
+        def on_cancel():
+            dialog.destroy()
+            if callback:
+                callback(None)
+        
+        confirm_btn = tk.Button(
+            btn_frame, 
+            text="Confirm", 
+            command=on_confirm,
+            font=("Segoe UI", 10, "bold"),
+            bg='#4299e1', 
+            fg='white',
+            width=10,
+            height=1,
+            relief='flat',
+            borderwidth=0
+        )
+        confirm_btn.pack(side='left', padx=10)
+        
+        cancel_btn = tk.Button(
+            btn_frame, 
+            text="Cancel", 
+            command=on_cancel,
+            font=("Segoe UI", 10, "bold"),
+            bg='#e53e3e', 
+            fg='white',
+            width=10,
+            height=1,
+            relief='flat',
+            borderwidth=0
+        )
+        cancel_btn.pack(side='left', padx=10)
+
+        # Add hover effects
+        def on_enter_confirm(e):
+            confirm_btn.config(bg='#3182ce')
+        def on_leave_confirm(e):
+            confirm_btn.config(bg='#4299e1')
+        def on_enter_cancel(e):
+            cancel_btn.config(bg='#c53030')
+        def on_leave_cancel(e):
+            cancel_btn.config(bg='#e53e3e')
+            
+        confirm_btn.bind("<Enter>", on_enter_confirm)
+        confirm_btn.bind("<Leave>", on_leave_confirm)
+        cancel_btn.bind("<Enter>", on_enter_cancel)
+        cancel_btn.bind("<Leave>", on_leave_cancel)
+
     def refresh_security_logs(self):
         """Refresh and display security logs."""
         self.logs_output.delete(1.0, tk.END)

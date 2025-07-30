@@ -3,8 +3,10 @@ LDAP Authentication Module
 """
 
 from typing import Tuple, Dict, Any, Optional
-from ldap3 import Server, Connection, ALL, NTLM
+from ldap3 import Server, Connection, ALL, NTLM, MODIFY_ADD, MODIFY_DELETE
 from ldap3.core.exceptions import LDAPException
+import secrets
+import string
 
 from ..core.config import Config
 from ..core.base import BaseAuthenticator
@@ -201,3 +203,191 @@ class LDAPAuthenticator(BaseAuthenticator):
         except Exception as e:
             print(f"Error getting user info: {e}")
             return None
+
+    def user_exists(self, username: str) -> bool:
+        """Check if a user exists in LDAP."""
+        try:
+            server = Server(self.server_uri, get_info=ALL)
+            conn = Connection(server)
+            conn.bind()
+            
+            # Prepare search base - convert domain to DN format
+            if '.' in self.base_dn:
+                domain_parts = self.base_dn.split('.')
+                search_base = ','.join([f"DC={part}" for part in domain_parts])
+            else:
+                search_base = f"DC={self.base_dn}"
+            
+            search_filter = f"(sAMAccountName={username})"
+            conn.search(
+                search_base=search_base,
+                search_filter=search_filter,
+                attributes=['cn']
+            )
+            
+            user_exists = len(conn.entries) > 0
+            conn.unbind()
+            return user_exists
+            
+        except Exception as e:
+            print(f"Error checking if user exists: {e}")
+            return False
+
+    def create_user(self, username: str, password: str, first_name: str = "", 
+                   last_name: str = "", email: str = "", role: str = "user") -> Tuple[bool, str]:
+        """
+        Create a new user in LDAP.
+        
+        Args:
+            username: Username for the new user
+            password: Password for the new user
+            first_name: First name of the user
+            last_name: Last name of the user
+            email: Email address of the user
+            role: Role/group for the user (admin, operator, user)
+            
+        Returns:
+            Tuple of (success, message)
+        """
+        try:
+            # Check if user already exists
+            if self.user_exists(username):
+                return False, f"User '{username}' already exists"
+            
+            server = Server(self.server_uri, get_info=ALL)
+            # Use administrative credentials to create user
+            # This would need to be configured with proper admin credentials
+            conn = Connection(server)
+            
+            # For this example, we'll use anonymous bind or would need admin credentials
+            # In production, you'd need proper LDAP admin credentials
+            if not conn.bind():
+                return False, "Failed to connect to LDAP server with admin privileges"
+            
+            # Prepare search base - convert domain to DN format
+            if '.' in self.base_dn:
+                domain_parts = self.base_dn.split('.')
+                search_base = ','.join([f"DC={part}" for part in domain_parts])
+            else:
+                search_base = f"DC={self.base_dn}"
+            
+            # Create user DN
+            user_dn = f"CN={first_name} {last_name},CN=Users,{search_base}"
+            
+            # User attributes
+            full_name = f"{first_name} {last_name}".strip() or username
+            display_name = full_name
+            
+            attributes = {
+                'objectClass': ['top', 'person', 'organizationalPerson', 'user'],
+                'cn': full_name,
+                'sAMAccountName': username,
+                'userPrincipalName': f"{username}@{self.base_dn}",
+                'displayName': display_name,
+                'givenName': first_name,
+                'sn': last_name or username,
+                'userAccountControl': 512,  # Normal account, enabled
+            }
+            
+            if email:
+                attributes['mail'] = email
+            
+            # Add user to LDAP
+            success = conn.add(user_dn, attributes=attributes)
+            
+            if success:
+                # Set password
+                conn.extend.microsoft.modify_password(user_dn, password)
+                
+                # Add user to appropriate group based on role
+                group_dn = self._get_group_dn(role, search_base)
+                if group_dn:
+                    conn.modify(group_dn, {'member': [(MODIFY_ADD, [user_dn])]})
+                
+                conn.unbind()
+                SecurityUtils.log_security_event("LDAP_USER_CREATED", 
+                                               f"Created LDAP user: {username}, role: {role}")
+                return True, f"User '{username}' created successfully"
+            else:
+                conn.unbind()
+                return False, f"Failed to create user: {conn.result}"
+            
+        except LDAPException as e:
+            return False, f"LDAP error creating user: {str(e)}"
+        except Exception as e:
+            return False, f"Error creating user: {str(e)}"
+
+    def delete_user(self, username: str) -> Tuple[bool, str]:
+        """
+        Delete a user from LDAP.
+        
+        Args:
+            username: Username to delete
+            
+        Returns:
+            Tuple of (success, message)
+        """
+        try:
+            if not self.user_exists(username):
+                return False, f"User '{username}' does not exist"
+            
+            server = Server(self.server_uri, get_info=ALL)
+            conn = Connection(server)
+            
+            if not conn.bind():
+                return False, "Failed to connect to LDAP server with admin privileges"
+            
+            # Find user DN
+            if '.' in self.base_dn:
+                domain_parts = self.base_dn.split('.')
+                search_base = ','.join([f"DC={part}" for part in domain_parts])
+            else:
+                search_base = f"DC={self.base_dn}"
+            
+            search_filter = f"(sAMAccountName={username})"
+            conn.search(
+                search_base=search_base,
+                search_filter=search_filter,
+                attributes=['dn']
+            )
+            
+            if not conn.entries:
+                conn.unbind()
+                return False, f"User '{username}' not found"
+            
+            user_dn = str(conn.entries[0].entry_dn)
+            
+            # Delete user
+            success = conn.delete(user_dn)
+            
+            if success:
+                conn.unbind()
+                SecurityUtils.log_security_event("LDAP_USER_DELETED", f"Deleted LDAP user: {username}")
+                return True, f"User '{username}' deleted successfully"
+            else:
+                conn.unbind()
+                return False, f"Failed to delete user: {conn.result}"
+                
+        except LDAPException as e:
+            return False, f"LDAP error deleting user: {str(e)}"
+        except Exception as e:
+            return False, f"Error deleting user: {str(e)}"
+
+    def _get_group_dn(self, role: str, search_base: str) -> Optional[str]:
+        """Get the DN for a group based on role."""
+        group_mapping = {
+            'admin': self.admin_group,
+            'operator': self.operator_group,
+            'user': self.user_group
+        }
+        
+        group_name = group_mapping.get(role, self.user_group)
+        if group_name:
+            return f"CN={group_name},CN=Groups,{search_base}"
+        return None
+
+    def generate_temporary_password(self, length: int = 12) -> str:
+        """Generate a secure temporary password for new users."""
+        alphabet = string.ascii_letters + string.digits + "!@#$%^&*"
+        password = ''.join(secrets.choice(alphabet) for _ in range(length))
+        return password

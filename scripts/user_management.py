@@ -93,6 +93,31 @@ class UserManagementGUI:
             width=20
         ).pack(pady=10, padx=10, side='left')
 
+        # LDAP User Creation Section
+        ldap_frame = tk.LabelFrame(main_frame, text="LDAP User Management", 
+                                  font=("Helvetica", 12, "bold"), bg='lightgray')
+        ldap_frame.pack(fill='x', pady=10)
+        
+        tk.Button(
+            ldap_frame,
+            text="Create LDAP User + Face (Camera)",
+            command=self.create_ldap_user_camera,
+            font=("Helvetica", 11),
+            bg='darkslategray',
+            fg='white',
+            width=30
+        ).pack(pady=10, padx=10, side='left')
+        
+        tk.Button(
+            ldap_frame,
+            text="Create LDAP User + Face (Image)",
+            command=self.create_ldap_user_image,
+            font=("Helvetica", 11),
+            bg='steelblue',
+            fg='white',
+            width=30
+        ).pack(pady=10, padx=10, side='left')
+
         # Authentication Testing Section
         test_frame = tk.LabelFrame(main_frame, text="Authentication Testing", font=("Helvetica", 12, "bold"), bg='lightgray')
         test_frame.pack(fill='x', pady=10)
@@ -475,6 +500,150 @@ class UserManagementGUI:
             self.log_output(f"❌ Fingerprint authentication error: {e}")
             messagebox.showerror("Error", f"Fingerprint authentication error: {e}")
     
+    def create_ldap_user_camera(self):
+        """Create LDAP user and register face from camera."""
+        # Get user information
+        username = simpledialog.askstring("Username", "Enter username:")
+        if not username:
+            return
+        
+        first_name = simpledialog.askstring("First Name", "Enter first name:") or ""
+        last_name = simpledialog.askstring("Last Name", "Enter last name:") or ""
+        email = simpledialog.askstring("Email", "Enter email address:") or ""
+        
+        # Role selection
+        role_window = tk.Toplevel(self.root)
+        role_window.title("Select Role")
+        role_window.geometry("300x200")
+        role_window.transient(self.root)
+        role_window.grab_set()
+        
+        role_var = tk.StringVar(value="user")
+        
+        tk.Label(role_window, text="Select user role:", font=("Helvetica", 12)).pack(pady=10)
+        
+        roles = [("User", "user"), ("Operator", "operator"), ("Admin", "admin")]
+        for text, value in roles:
+            tk.Radiobutton(role_window, text=text, variable=role_var, value=value,
+                          font=("Helvetica", 10)).pack(anchor='w', padx=20)
+        
+        role_selected = [False]
+        
+        def confirm_role():
+            role_selected[0] = True
+            role_window.destroy()
+        
+        tk.Button(role_window, text="Confirm", command=confirm_role,
+                 font=("Helvetica", 11), bg='green', fg='white').pack(pady=20)
+        
+        role_window.wait_window()
+        
+        if not role_selected[0]:
+            return
+        
+        role = role_var.get()
+        
+        self.log_output(f"Creating LDAP user with face registration from camera: {username}")
+        self.log_output(f"Name: {first_name} {last_name}, Role: {role}, Email: {email}")
+        
+        try:
+            success, message = self.deepface_auth.create_ldap_user_with_face(
+                username=username,
+                first_name=first_name,
+                last_name=last_name,
+                email=email,
+                role=role,
+                image_path=None  # None means capture from camera
+            )
+            
+            if success:
+                self.log_output(f"✅ {message}")
+                # Show temporary password to user
+                messagebox.showinfo("Success", message)
+            else:
+                self.log_output(f"❌ {message}")
+                messagebox.showerror("Error", message)
+        except Exception as e:
+            self.log_output(f"❌ Error creating LDAP user with face: {e}")
+            messagebox.showerror("Error", f"Error creating LDAP user with face: {e}")
+
+    def create_ldap_user_image(self):
+        """Create LDAP user and register face from image file."""
+        # Get user information
+        username = simpledialog.askstring("Username", "Enter username:")
+        if not username:
+            return
+        
+        first_name = simpledialog.askstring("First Name", "Enter first name:") or ""
+        last_name = simpledialog.askstring("Last Name", "Enter last name:") or ""
+        email = simpledialog.askstring("Email", "Enter email address:") or ""
+        
+        # Role selection
+        role_window = tk.Toplevel(self.root)
+        role_window.title("Select Role")
+        role_window.geometry("300x200")
+        role_window.transient(self.root)
+        role_window.grab_set()
+        
+        role_var = tk.StringVar(value="user")
+        
+        tk.Label(role_window, text="Select user role:", font=("Helvetica", 12)).pack(pady=10)
+        
+        roles = [("User", "user"), ("Operator", "operator"), ("Admin", "admin")]
+        for text, value in roles:
+            tk.Radiobutton(role_window, text=text, variable=role_var, value=value,
+                          font=("Helvetica", 10)).pack(anchor='w', padx=20)
+        
+        role_selected = [False]
+        
+        def confirm_role():
+            role_selected[0] = True
+            role_window.destroy()
+        
+        tk.Button(role_window, text="Confirm", command=confirm_role,
+                 font=("Helvetica", 11), bg='green', fg='white').pack(pady=20)
+        
+        role_window.wait_window()
+        
+        if not role_selected[0]:
+            return
+        
+        role = role_var.get()
+        
+        # Select image file
+        image_path = filedialog.askopenfilename(
+            title="Select face image",
+            filetypes=[("Image files", "*.jpg *.jpeg *.png *.bmp")]
+        )
+        
+        if not image_path:
+            return
+        
+        self.log_output(f"Creating LDAP user with face registration from image: {username}")
+        self.log_output(f"Name: {first_name} {last_name}, Role: {role}, Email: {email}")
+        self.log_output(f"Image path: {image_path}")
+        
+        try:
+            success, message = self.deepface_auth.create_ldap_user_with_face(
+                username=username,
+                first_name=first_name,
+                last_name=last_name,
+                email=email,
+                role=role,
+                image_path=image_path
+            )
+            
+            if success:
+                self.log_output(f"✅ {message}")
+                # Show temporary password to user
+                messagebox.showinfo("Success", message)
+            else:
+                self.log_output(f"❌ {message}")
+                messagebox.showerror("Error", message)
+        except Exception as e:
+            self.log_output(f"❌ Error creating LDAP user with face: {e}")
+            messagebox.showerror("Error", f"Error creating LDAP user with face: {e}")
+
     def list_registered_faces(self):
         """List all registered faces."""
         self.log_output("Listing registered faces...")
