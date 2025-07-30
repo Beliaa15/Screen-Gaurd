@@ -1,0 +1,26 @@
+# Additional requirements for DeepFace integration
+# Add these to your existing requirements.txt
+
+# DeepFace and its dependencies
+deepface>=0.0.92
+tensorflow>=2.12.0
+tf-keras>=2.12.0
+
+# Image processing and computer vision
+opencv-python>=4.8.1.78
+pillow>=10.0.1
+
+# Mathematical operations
+numpy>=1.24.3
+
+# Optional: GPU support (uncomment if you have NVIDIA GPU)
+# tensorflow-gpu
+
+# For better face detection backends (optional)
+# mtcnn>=0.1.1
+# mediapipe>=0.10.0
+# retina-face>=0.0.13
+
+# Database (SQLite is built-in, but you can use PostgreSQL for production)
+# psycopg2-binary>=2.9.7  # Only if using PostgreSQL
+# pgvector>=0.2.4         # Only if using PostgreSQL with vector similarity

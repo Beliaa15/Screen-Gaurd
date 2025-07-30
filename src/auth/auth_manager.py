@@ -10,7 +10,7 @@ from typing import Optional, Tuple, Dict, Any
 from ..core.config import Config
 from ..utils.security_utils import SecurityUtils
 from .ldap_auth import LDAPAuthenticator
-from .biometric_auth import BiometricAuthenticator
+from .deepface_auth import DeepFaceAuthenticator
 from .session_manager import SessionManager
 
 
@@ -19,7 +19,7 @@ class AuthenticationManager:
     
     def __init__(self):
         self.ldap_auth = LDAPAuthenticator(Config())
-        self.biometric_auth = BiometricAuthenticator()
+        self.deepface_auth = DeepFaceAuthenticator()
         self.session_manager = SessionManager()
         self.monitoring_thread = None
         self.stop_monitoring = False
@@ -226,15 +226,17 @@ class AuthenticationManager:
             return self.session_manager.current_session.get('role')
         return None
     
-    def register_user_face(self, username: str, image_path: str = None) -> bool:
-        """Register a user's face for biometric authentication."""
-        return self.biometric_auth.register_face(username, image_path)
+    def register_user_face_deepface(self, username: str, first_name: str = "", 
+                                   last_name: str = "", email: str = "", 
+                                   role: str = "user", image_path: str = None) -> bool:
+        """Register a user's face using DeepFace authentication."""
+        return self.deepface_auth.register_face(username, first_name, last_name, email, role, image_path)
     
     def authenticate_with_method(self, method: str, credentials: Dict[str, Any]) -> Tuple[bool, Optional[str]]:
         """Authenticate using a specific method."""
         if method == 'ldap' or method == 'email_password':
             return self.ldap_auth.authenticate(credentials)
-        elif method == 'biometric':
-            return self.biometric_auth.authenticate(credentials)
+        elif method == 'deepface' or method == 'face_advanced':
+            return self.deepface_auth.authenticate(credentials)
         else:
             return False, f"Unknown authentication method: {method}"

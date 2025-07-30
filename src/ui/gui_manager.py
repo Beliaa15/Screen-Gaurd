@@ -4,15 +4,17 @@ Provides full-screen startup screen, login interface, and dashboard.
 """
 
 import mttkinter.mtTkinter as tk
-import tkinter.messagebox as messagebox
 import threading
 import time
 from datetime import datetime
+import subprocess
+import sys
+from pathlib import Path
 
 from ..core.config import Config
 from ..utils.security_utils import SecurityUtils
 from ..auth.ldap_auth import LDAPAuthenticator
-from ..auth.biometric_auth import BiometricAuthenticator
+from ..auth.deepface_auth import DeepFaceAuthenticator
 
 
 class SecurityGUI:
@@ -22,9 +24,10 @@ class SecurityGUI:
         """Initialize the GUI."""
         self.root = tk.Tk()
         self.auth_manager = auth_manager
-        self.biometric_auth = BiometricAuthenticator()
+        self.deepface_auth = DeepFaceAuthenticator()
         self.is_authenticated = False
         self.current_user = None
+        self.current_role = None
         self.current_screen = None
         
         # Configure main window
@@ -62,6 +65,136 @@ class SecurityGUI:
             widget.destroy()
         # Ensure security properties are maintained after clearing screen
         self.maintain_security_properties()
+    
+    def show_custom_dialog(self, title, message, dialog_type="info", input_field=False, password=False, callback=None):
+        """Show a custom dialog within the GUI."""
+        # Create overlay
+        self.dialog_overlay = tk.Frame(self.root, bg='black')
+        self.dialog_overlay.place(x=0, y=0, relwidth=1, relheight=1)
+        self.dialog_overlay.configure(bg='black')
+        self.dialog_overlay.attributes = lambda: None  # Prevent attribute errors
+        
+        # Center the dialog
+        dialog_frame = tk.Frame(self.dialog_overlay, bg='darkblue', bd=3, relief='raised')
+        dialog_frame.place(relx=0.5, rely=0.5, anchor='center', width=500, height=300)
+        
+        # Title
+        title_label = tk.Label(
+            dialog_frame,
+            text=title,
+            fg="white",
+            bg="darkblue",
+            font=("Helvetica", 16, "bold")
+        )
+        title_label.pack(pady=20)
+        
+        # Message
+        message_label = tk.Label(
+            dialog_frame,
+            text=message,
+            fg="lightgray",
+            bg="darkblue",
+            font=("Helvetica", 12),
+            wraplength=400,
+            justify='center'
+        )
+        message_label.pack(pady=10)
+        
+        # Input field if needed
+        self.dialog_input = None
+        if input_field:
+            self.dialog_input = tk.Entry(
+                dialog_frame,
+                font=("Helvetica", 12),
+                width=30,
+                show="*" if password else ""
+            )
+            self.dialog_input.pack(pady=20)
+            self.dialog_input.focus_set()
+        
+        # Buttons frame
+        buttons_frame = tk.Frame(dialog_frame, bg='darkblue')
+        buttons_frame.pack(pady=20)
+        
+        if dialog_type == "yesno":
+            # Yes button
+            yes_btn = tk.Button(
+                buttons_frame,
+                text="Yes",
+                command=lambda: self._close_dialog_with_result(True, callback),
+                font=("Helvetica", 12, "bold"),
+                bg="green",
+                fg="white",
+                width=10
+            )
+            yes_btn.pack(side='left', padx=10)
+            
+            # No button
+            no_btn = tk.Button(
+                buttons_frame,
+                text="No",
+                command=lambda: self._close_dialog_with_result(False, callback),
+                font=("Helvetica", 12, "bold"),
+                bg="red",
+                fg="white",
+                width=10
+            )
+            no_btn.pack(side='left', padx=10)
+        elif input_field:
+            # OK button for input
+            ok_btn = tk.Button(
+                buttons_frame,
+                text="OK",
+                command=lambda: self._close_dialog_with_input(callback),
+                font=("Helvetica", 12, "bold"),
+                bg="blue",
+                fg="white",
+                width=10
+            )
+            ok_btn.pack(side='left', padx=10)
+            
+            # Cancel button for input
+            cancel_btn = tk.Button(
+                buttons_frame,
+                text="Cancel",
+                command=lambda: self._close_dialog_with_result(None, callback),
+                font=("Helvetica", 12, "bold"),
+                bg="gray",
+                fg="white",
+                width=10
+            )
+            cancel_btn.pack(side='left', padx=10)
+            
+            # Bind Enter key
+            if self.dialog_input:
+                self.dialog_input.bind('<Return>', lambda e: self._close_dialog_with_input(callback))
+        else:
+            # OK button for info/error
+            ok_btn = tk.Button(
+                buttons_frame,
+                text="OK",
+                command=lambda: self._close_dialog_with_result(True, callback),
+                font=("Helvetica", 12, "bold"),
+                bg="blue",
+                fg="white",
+                width=15
+            )
+            ok_btn.pack()
+    
+    def _close_dialog_with_result(self, result, callback):
+        """Close dialog and execute callback with result."""
+        if hasattr(self, 'dialog_overlay'):
+            self.dialog_overlay.destroy()
+        if callback:
+            callback(result)
+    
+    def _close_dialog_with_input(self, callback):
+        """Close dialog and execute callback with input value."""
+        value = self.dialog_input.get() if self.dialog_input else None
+        if hasattr(self, 'dialog_overlay'):
+            self.dialog_overlay.destroy()
+        if callback:
+            callback(value)
 
     def run(self):
         """Run the GUI main loop."""
@@ -246,20 +379,20 @@ class SecurityGUI:
         )
         fingerprint_btn.pack(pady=10)
         
-        # Face Recognition button
-        face_btn = tk.Button(
+        # DeepFace Recognition button (Advanced)
+        deepface_btn = tk.Button(
             methods_frame,
-            text="👤 Face Recognition",
-            command=lambda: self.select_auth_method("face"),
+            text="🧠 Face Recognition",
+            command=lambda: self.select_auth_method("deepface"),
             font=("Helvetica", 16, "bold"),
-            bg="purple",
+            bg="darkviolet",
             fg="white",
             width=20,
             height=3,
             relief="raised",
             bd=3
         )
-        face_btn.pack(pady=10)
+        deepface_btn.pack(pady=10)
     
     def select_auth_method(self, method):
         """Handle authentication method selection."""
@@ -267,8 +400,8 @@ class SecurityGUI:
             self.show_domain_auth_form()
         elif method == "fingerprint":
             self.show_fingerprint_auth()
-        elif method == "face":
-            self.show_face_auth()
+        elif method == "deepface":
+            self.show_deepface_auth()
     
     def show_method_selection(self):
         """Show method selection screen."""
@@ -423,83 +556,13 @@ class SecurityGUI:
         # Start authentication process
         self.root.after(1000, self.attempt_fingerprint_login)
     
-    def show_face_auth(self):
-        """Show face recognition authentication screen."""
-        self.clear_screen()
-        self.current_screen = "face"
-        
-        # Main container
-        main_frame = tk.Frame(self.root, bg='purple')
-        main_frame.pack(expand=True, fill='both')
-        
-        # Center frame
-        center_frame = tk.Frame(main_frame, bg='purple')
-        center_frame.pack(expand=True)
-        
-        # Title
-        title_label = tk.Label(
-            center_frame,
-            text="👤 FACE RECOGNITION AUTHENTICATION",
-            fg="white",
-            bg="purple",
-            font=("Helvetica", 20, "bold")
-        )
-        title_label.pack(pady=(50, 30))
-        
-        # Face icon
-        self.face_icon = tk.Label(
-            center_frame,
-            text="👤",
-            fg="white",
-            bg="purple",
-            font=("Helvetica", 80)
-        )
-        self.face_icon.pack(pady=20)
-        
-        # Instructions
-        instructions_label = tk.Label(
-            center_frame,
-            text="Look directly at the camera\nEnsure your face is well-lit and visible",
-            fg="lightgray",
-            bg="purple",
-            font=("Helvetica", 16),
-            justify='center'
-        )
-        instructions_label.pack(pady=20)
-        
-        # Status label
-        self.face_status = tk.Label(
-            center_frame,
-            text="Initializing camera...",
-            fg="yellow",
-            bg="purple",
-            font=("Helvetica", 14)
-        )
-        self.face_status.pack(pady=10)
-        
-        # Cancel button
-        cancel_btn = tk.Button(
-            center_frame,
-            text="← Cancel",
-            command=self.show_method_selection,
-            font=("Helvetica", 12, "bold"),
-            bg="red",
-            fg="white",
-            width=15,
-            height=2
-        )
-        cancel_btn.pack(pady=30)
-        
-        # Start authentication process
-        self.root.after(1000, self.attempt_face_login)
-    
     def attempt_password_login(self):
         """Attempt domain/password authentication."""
         username_input = self.email_entry.get().strip()
         password = self.password_entry.get()
         
         if not username_input or not password:
-            messagebox.showerror("Error", "Please enter both username and password")
+            self.show_custom_dialog("Error", "Please enter both username and password", "error")
             return
         
         # Validate domain\username format
@@ -512,20 +575,17 @@ class SecurityGUI:
             if not domain or not username:
                 raise ValueError("Invalid format")
         except ValueError:
-            messagebox.showerror("Error", "Invalid username format. Use domain\\username")
+            self.show_custom_dialog("Error", "Invalid username format. Use domain\\username", "error")
             return
         
         self.show_auth_loading("Authenticating with domain server...")
         
         # Simulate authentication delay
         def auth_thread():
-            time.sleep(2)
-            
-            # Real LDAP/NTLM authentication
             try:
                 ldap_auth = LDAPAuthenticator(Config())
                 success, result = ldap_auth.authenticate({
-                    'username': username_input,  # Pass full domain\username
+                    'username': username_input,
                     'password': password,
                     'domain': domain
                 })
@@ -565,23 +625,95 @@ class SecurityGUI:
         
         threading.Thread(target=auth_thread, daemon=True).start()
     
-    def attempt_face_login(self):
-        """Attempt face recognition authentication."""
-        if self.current_screen != "face":
+    def show_deepface_auth(self):
+        """Show DeepFace authentication screen."""
+        self.clear_screen()
+        self.current_screen = "deepface"
+        
+        # Main container
+        main_frame = tk.Frame(self.root, bg='darkviolet')
+        main_frame.pack(expand=True, fill='both')
+        
+        # Center frame
+        center_frame = tk.Frame(main_frame, bg='darkviolet')
+        center_frame.pack(expand=True)
+        
+        # Title
+        title_label = tk.Label(
+            center_frame,
+            text="🧠 ADVANCED FACE RECOGNITION",
+            fg="white",
+            bg="darkviolet",
+            font=("Helvetica", 20, "bold")
+        )
+        title_label.pack(pady=(50, 30))
+        
+        # DeepFace icon (animated brain)
+        self.deepface_icon = tk.Label(
+            center_frame,
+            text="🧠",
+            fg="cyan",
+            bg="darkviolet",
+            font=("Helvetica", 80)
+        )
+        self.deepface_icon.pack(pady=20)
+        
+        # Instructions
+        instructions_label = tk.Label(
+            center_frame,
+            text="Look directly at the camera\nAdvanced AI processing - please be patient\nEnsure good lighting and clear face visibility",
+            fg="lightgray",
+            bg="darkviolet",
+            font=("Helvetica", 16),
+            justify='center'
+        )
+        instructions_label.pack(pady=20)
+        
+        # Status label
+        self.deepface_status = tk.Label(
+            center_frame,
+            text="Initializing AI models...",
+            fg="yellow",
+            bg="darkviolet",
+            font=("Helvetica", 14)
+        )
+        self.deepface_status.pack(pady=10)
+        
+        # Cancel button
+        cancel_btn = tk.Button(
+            center_frame,
+            text="← Cancel",
+            command=self.show_method_selection,
+            font=("Helvetica", 12, "bold"),
+            bg="red",
+            fg="white",
+            width=15,
+            height=2
+        )
+        cancel_btn.pack(pady=30)
+        
+        # Start authentication process
+        self.root.after(2000, self.attempt_deepface_login)
+    
+    def attempt_deepface_login(self):
+        """Attempt DeepFace authentication."""
+        if self.current_screen != "deepface":
             return
             
-        self.face_status.config(text="Scanning face...")
+        self.deepface_status.config(text="Scanning with AI models...")
         
         def auth_thread():
             try:
-                result = self.biometric_auth.authenticate_face(timeout=30)
+                result = self.deepface_auth.authenticate_face(timeout=30)
                 if result:
-                    self.root.after(0, lambda: self.handle_auth_result(True, result, "face", "user"))
+                    username = result['username']
+                    role = result.get('role', 'user')
+                    self.root.after(0, lambda: self.handle_auth_result(True, username, "deepface", role))
                 else:
-                    self.root.after(0, lambda: self.handle_auth_result(False, None, "face", "Face not recognized"))
+                    self.root.after(0, lambda: self.handle_auth_result(False, None, "deepface", "Face not recognized by AI"))
             except Exception as e:
-                error_msg = f"Face recognition error: {str(e)}"
-                self.root.after(0, lambda: self.handle_auth_result(False, None, "face", error_msg))
+                error_msg = f"DeepFace authentication error: {str(e)}"
+                self.root.after(0, lambda: self.handle_auth_result(False, None, "deepface", error_msg))
         
         threading.Thread(target=auth_thread, daemon=True).start()
     
@@ -625,9 +757,11 @@ class SecurityGUI:
         """Show authentication success screen."""
         self.is_authenticated = True
         self.current_user = username
+        self.current_role = role
         
         SecurityUtils.log_security_event("GUI_AUTH_SUCCESS", f"GUI authentication successful for user: {username}")
         
+        # Show quick success message then go to dashboard
         self.clear_screen()
         self.current_screen = "success"
         
@@ -658,7 +792,7 @@ class SecurityGUI:
         # User info
         user_info = tk.Label(
             center_frame,
-            text=f"Welcome, {username}\nRole: {role}",
+            text=f"Welcome, {username}",
             fg="lightgray",
             bg="darkgreen",
             font=("Helvetica", 16),
@@ -666,18 +800,749 @@ class SecurityGUI:
         )
         user_info.pack(pady=20)
         
-        # Status message
-        status_label = tk.Label(
-            center_frame,
-            text="Starting security monitoring system...",
-            fg="yellow",
-            bg="darkgreen",
-            font=("Helvetica", 14)
-        )
-        status_label.pack(pady=30)
+        # Auto-proceed to dashboard after 2 seconds
+        self.root.after(2000, self.show_dashboard)
+    
+    def show_dashboard(self):
+        """Show the main dashboard after successful authentication."""
+        self.clear_screen()
+        self.current_screen = "dashboard"
         
-        # Auto-proceed to dashboard after 3 seconds
-        self.root.after(3000, self.show_main_dashboard)
+        # Main container
+        main_frame = tk.Frame(self.root, bg='darkblue')
+        main_frame.pack(expand=True, fill='both')
+        
+        # Header
+        header_frame = tk.Frame(main_frame, bg='navy', height=80)
+        header_frame.pack(fill='x')
+        header_frame.pack_propagate(False)
+        
+        # Title and user info
+        title_label = tk.Label(
+            header_frame,
+            text="🔒 PHYSICAL SECURITY SYSTEM - DASHBOARD",
+            fg="white",
+            bg="navy",
+            font=("Helvetica", 18, "bold")
+        )
+        title_label.pack(side='left', padx=20, pady=20)
+        
+        user_info = f"User: {self.current_user}"
+        if self.current_role:
+            user_info += f" | Role: {self.current_role.upper()}"
+        user_info += " | Status: AUTHENTICATED"
+        
+        user_label = tk.Label(
+            header_frame,
+            text=user_info,
+            fg="lightgreen",
+            bg="navy",
+            font=("Helvetica", 12)
+        )
+        user_label.pack(side='right', padx=20, pady=20)
+        
+        # Content area
+        content_frame = tk.Frame(main_frame, bg='darkblue')
+        content_frame.pack(expand=True, fill='both', padx=20, pady=20)
+        
+        # Welcome section
+        welcome_frame = tk.Frame(content_frame, bg='darkblue')
+        welcome_frame.pack(fill='x', pady=(0, 30))
+        
+        welcome_label = tk.Label(
+            welcome_frame,
+            text=f"Welcome, {self.current_user}!",
+            fg="white",
+            bg="darkblue",
+            font=("Helvetica", 24, "bold")
+        )
+        welcome_label.pack()
+        
+        status_label = tk.Label(
+            welcome_frame,
+            text="✅ Authentication Complete\n🔍 Object Detection System Ready\n📹 Camera Monitoring Available",
+            fg="lightgray",
+            bg="darkblue",
+            font=("Helvetica", 14),
+            justify='center'
+        )
+        status_label.pack(pady=10)
+        
+        # Control buttons section
+        controls_frame = tk.Frame(content_frame, bg='darkblue')
+        controls_frame.pack(fill='both', pady=(0, 10))
+        
+        # Admin controls (only show for admin users)
+        if self.current_role and self.current_role.lower() in ['admin', 'administrator']:
+            admin_frame = tk.LabelFrame(controls_frame, text="Administrator Controls", 
+                                       font=("Helvetica", 14, "bold"), fg="gold", bg="darkblue")
+            admin_frame.pack(pady=10, padx=20, fill='x')
+            
+            # User Management button
+            user_mgmt_btn = tk.Button(
+                admin_frame,
+                text="👥 User Management",
+                command=self.show_user_management,
+                font=("Helvetica", 14, "bold"),
+                bg="gold",
+                fg="black",
+                width=20,
+                height=2,
+                relief="raised",
+                bd=3
+            )
+            user_mgmt_btn.pack(pady=10, padx=10, side='left')
+
+            # View Logs button
+            logs_btn = tk.Button(
+                admin_frame,
+                text="📋 View Security Logs",
+                command=self.show_security_logs,
+                font=("Helvetica", 14, "bold"),
+                bg="blue",
+                fg="white",
+                width=20,
+                height=2,
+                relief="raised",
+                bd=3
+            )
+            logs_btn.pack(pady=10, padx=10, side='left')
+        
+        # Common controls
+        common_frame = tk.LabelFrame(controls_frame, text="System Controls", 
+                                   font=("Helvetica", 14, "bold"), fg="lightblue", bg="darkblue")
+        common_frame.pack(pady=10, padx=20, fill='x')
+
+        # Bottom controls
+        bottom_frame = tk.Frame(content_frame, bg='darkblue')
+        bottom_frame.pack(side='bottom', fill='x', pady=10)
+
+        # Logout button
+        logout_btn = tk.Button(
+            bottom_frame,
+            text="🚪 Logout",
+            command=self.logout,
+            font=("Helvetica", 12, "bold"),
+            bg="red",
+            fg="white",
+            width=15,
+            height=2
+        )
+        logout_btn.pack(side='right', padx=10)
+
+        # Minimize to tray button (right beside logout)
+        minimize_btn = tk.Button(
+            bottom_frame,
+            text="⬇ Minimize to System Tray",
+            command=self.minimize_to_system_tray,
+            font=("Helvetica", 12, "bold"),
+            bg="gray",
+            fg="white",
+            width=20,
+            height=2
+        )
+        minimize_btn.pack(side='right', padx=10)
+        
+        # System info
+        info_label = tk.Label(
+            bottom_frame,
+            text="Physical Security System v2.0 | Status: Active",
+            fg="lightgray",
+            bg="darkblue",
+            font=("Helvetica", 10)
+        )
+        info_label.pack(side='left', padx=20)
+    
+    def show_user_management(self):
+        """Show the user management interface within the GUI."""
+        self.clear_screen()
+        self.current_screen = "user_management"
+        
+        # Main container
+        main_frame = tk.Frame(self.root, bg='darkblue')
+        main_frame.pack(expand=True, fill='both')
+        
+        # Header
+        header_frame = tk.Frame(main_frame, bg='navy', height=80)
+        header_frame.pack(fill='x')
+        header_frame.pack_propagate(False)
+        
+        # Title and back button
+        title_label = tk.Label(
+            header_frame,
+            text="👥 USER MANAGEMENT",
+            fg="white",
+            bg="navy",
+            font=("Helvetica", 18, "bold")
+        )
+        title_label.pack(side='left', padx=20, pady=20)
+        
+        back_btn = tk.Button(
+            header_frame,
+            text="← Back to Dashboard",
+            command=self.show_dashboard,
+            font=("Helvetica", 12, "bold"),
+            bg="gray",
+            fg="white",
+            width=20,
+            height=2
+        )
+        back_btn.pack(side='right', padx=20, pady=15)
+        
+        # Content area
+        content_frame = tk.Frame(main_frame, bg='darkblue')
+        content_frame.pack(expand=True, fill='both', padx=20, pady=20)
+        
+        # Face Registration Section
+        face_frame = tk.LabelFrame(content_frame, text="Face Registration (DeepFace)", 
+                                  font=("Helvetica", 12, "bold"), fg="gold", bg="darkblue")
+        face_frame.pack(fill='x', pady=10)
+        
+        tk.Button(
+            face_frame,
+            text="📷 Register Face (Camera)",
+            command=self.register_face_camera,
+            font=("Helvetica", 11, "bold"),
+            bg="darkgreen",
+            fg="white",
+            width=25,
+            height=2
+        ).pack(pady=10, padx=10, side='left')
+        
+        tk.Button(
+            face_frame,
+            text="🖼️ Register Face (Image)",
+            command=self.register_face_image,
+            font=("Helvetica", 11, "bold"),
+            bg="darkblue",
+            fg="white",
+            width=25,
+            height=2
+        ).pack(pady=10, padx=10, side='left')
+        
+        # User Management Section
+        user_frame = tk.LabelFrame(content_frame, text="User Management", 
+                                  font=("Helvetica", 12, "bold"), fg="lightblue", bg="darkblue")
+        user_frame.pack(fill='x', pady=10)
+        
+        tk.Button(
+            user_frame,
+            text="📋 List Users",
+            command=self.list_registered_users,
+            font=("Helvetica", 11, "bold"),
+            bg="purple",
+            fg="white",
+            width=20,
+            height=2
+        ).pack(pady=10, padx=10, side='left')
+        
+        tk.Button(
+            user_frame,
+            text="🗑️ Delete User",
+            command=self.delete_user_face,
+            font=("Helvetica", 11, "bold"),
+            bg="darkred",
+            fg="white",
+            width=20,
+            height=2
+        ).pack(pady=10, padx=10, side='left')
+        
+        # Authentication Testing Section
+        test_frame = tk.LabelFrame(content_frame, text="Authentication Testing", 
+                                  font=("Helvetica", 12, "bold"), fg="orange", bg="darkblue")
+        test_frame.pack(fill='x', pady=10)
+        
+        tk.Button(
+            test_frame,
+            text="🧠 Test DeepFace",
+            command=self.test_deepface_auth,
+            font=("Helvetica", 11, "bold"),
+            bg="darkviolet",
+            fg="white",
+            width=20,
+            height=2
+        ).pack(pady=10, padx=10, side='left')
+        
+        tk.Button(
+            test_frame,
+            text="🔐 Test LDAP",
+            command=self.test_ldap_auth,
+            font=("Helvetica", 11, "bold"),
+            bg="orange",
+            fg="white",
+            width=20,
+            height=2
+        ).pack(pady=10, padx=10, side='left')
+        
+        # Output area
+        output_frame = tk.LabelFrame(content_frame, text="Output", 
+                                    font=("Helvetica", 12, "bold"), fg="white", bg="darkblue")
+        output_frame.pack(fill='both', expand=True, pady=10)
+        
+        # Create text widget with scrollbar
+        text_frame = tk.Frame(output_frame, bg='darkblue')
+        text_frame.pack(fill='both', expand=True, padx=10, pady=10)
+        
+        self.user_mgmt_output = tk.Text(
+            text_frame,
+            height=15,
+            font=("Courier", 10),
+            bg='black',
+            fg='lightgreen',
+            wrap=tk.WORD
+        )
+        self.user_mgmt_output.pack(side='left', fill='both', expand=True)
+        
+        scrollbar = tk.Scrollbar(text_frame, command=self.user_mgmt_output.yview)
+        scrollbar.pack(side='right', fill='y')
+        self.user_mgmt_output.config(yscrollcommand=scrollbar.set)
+        
+        self.log_user_mgmt_output("User Management interface loaded. Select an operation above.")
+    
+    def show_security_logs(self):
+        """Show the security logs interface within the GUI."""
+        self.clear_screen()
+        self.current_screen = "security_logs"
+        
+        # Main container
+        main_frame = tk.Frame(self.root, bg='darkblue')
+        main_frame.pack(expand=True, fill='both')
+        
+        # Header
+        header_frame = tk.Frame(main_frame, bg='navy', height=80)
+        header_frame.pack(fill='x')
+        header_frame.pack_propagate(False)
+        
+        # Title and back button
+        title_label = tk.Label(
+            header_frame,
+            text="📋 SECURITY LOGS",
+            fg="white",
+            bg="navy",
+            font=("Helvetica", 18, "bold")
+        )
+        title_label.pack(side='left', padx=20, pady=20)
+        
+        back_btn = tk.Button(
+            header_frame,
+            text="← Back to Dashboard",
+            command=self.show_dashboard,
+            font=("Helvetica", 12, "bold"),
+            bg="gray",
+            fg="white",
+            width=20,
+            height=2
+        )
+        back_btn.pack(side='right', padx=20, pady=15)
+        
+        # Content area
+        content_frame = tk.Frame(main_frame, bg='darkblue')
+        content_frame.pack(expand=True, fill='both', padx=20, pady=20)
+        
+        # Controls section
+        controls_frame = tk.Frame(content_frame, bg='darkblue')
+        controls_frame.pack(fill='x', pady=(0, 10))
+        
+        tk.Button(
+            controls_frame,
+            text="🔄 Refresh Logs",
+            command=self.refresh_security_logs,
+            font=("Helvetica", 11, "bold"),
+            bg="green",
+            fg="white",
+            width=15,
+            height=2
+        ).pack(side='left', padx=10)
+        
+        tk.Button(
+            controls_frame,
+            text="📅 Today's Logs",
+            command=lambda: self.filter_logs_by_date("today"),
+            font=("Helvetica", 11, "bold"),
+            bg="blue",
+            fg="white",
+            width=15,
+            height=2
+        ).pack(side='left', padx=10)
+        
+        tk.Button(
+            controls_frame,
+            text="🗂️ All Logs",
+            command=lambda: self.filter_logs_by_date("all"),
+            font=("Helvetica", 11, "bold"),
+            bg="purple",
+            fg="white",
+            width=15,
+            height=2
+        ).pack(side='left', padx=10)
+        
+        # Log display area
+        log_frame = tk.LabelFrame(content_frame, text="Security Log Entries", 
+                                 font=("Helvetica", 12, "bold"), fg="white", bg="darkblue")
+        log_frame.pack(fill='both', expand=True)
+        
+        # Create text widget with scrollbar
+        text_frame = tk.Frame(log_frame, bg='darkblue')
+        text_frame.pack(fill='both', expand=True, padx=10, pady=10)
+        
+        self.logs_output = tk.Text(
+            text_frame,
+            font=("Courier", 9),
+            bg='black',
+            fg='lightgreen',
+            wrap=tk.WORD
+        )
+        self.logs_output.pack(side='left', fill='both', expand=True)
+        
+        scrollbar = tk.Scrollbar(text_frame, command=self.logs_output.yview)
+        scrollbar.pack(side='right', fill='y')
+        self.logs_output.config(yscrollcommand=scrollbar.set)
+        
+        # Load initial logs
+        self.refresh_security_logs()
+    
+    def open_user_management(self):
+        """Deprecated - replaced by show_user_management."""
+        self.show_user_management()
+    
+    def view_security_logs(self):
+        """Deprecated - replaced by show_security_logs."""
+        self.show_security_logs()
+    
+    def log_user_mgmt_output(self, message: str):
+        """Log message to user management output area."""
+        if hasattr(self, 'user_mgmt_output'):
+            timestamp = datetime.now().strftime("%H:%M:%S")
+            formatted_message = f"[{timestamp}] {message}\n"
+            self.user_mgmt_output.insert(tk.END, formatted_message)
+            self.user_mgmt_output.see(tk.END)
+            self.root.update_idletasks()
+    
+    def register_face_camera(self):
+        """Register face from camera."""
+        def on_username_input(username):
+            if not username:
+                return
+            
+            self.log_user_mgmt_output(f"Starting face registration for user: {username}")
+            
+            def registration_thread():
+                try:
+                    success = self.deepface_auth.register_face(username)
+                    if success:
+                        self.root.after(0, lambda: self.log_user_mgmt_output(f"✅ Face registered successfully for {username}"))
+                        self.root.after(0, lambda: self.show_custom_dialog("Success", f"Face registered successfully for {username}", "info"))
+                    else:
+                        self.root.after(0, lambda: self.log_user_mgmt_output(f"❌ Face registration failed for {username}"))
+                        self.root.after(0, lambda: self.show_custom_dialog("Error", f"Face registration failed for {username}", "error"))
+                except Exception as e:
+                    self.root.after(0, lambda: self.log_user_mgmt_output(f"❌ Error during face registration: {e}"))
+                    self.root.after(0, lambda: self.show_custom_dialog("Error", f"Face registration error: {e}", "error"))
+            
+            threading.Thread(target=registration_thread, daemon=True).start()
+        
+        self.show_custom_dialog("Username", "Enter username for face registration:", "info", input_field=True, callback=on_username_input)
+    
+    def register_face_image(self):
+        """Register face from image file."""
+        def on_username_input(username):
+            if not username:
+                return
+            
+            # Show file selection dialog within the GUI
+            self.show_file_selection_dialog("Select face image", [("Image files", "*.jpg *.jpeg *.png *.bmp")], 
+                                           lambda image_path: self._process_image_registration(username, image_path))
+        
+        self.show_custom_dialog("Username", "Enter username for face registration:", "info", input_field=True, callback=on_username_input)
+    
+    def show_file_selection_dialog(self, title, filetypes, callback):
+        """Show file selection dialog within GUI."""
+        # For now, we'll use a simple text input for the file path
+        # In a full implementation, you could create a file browser within the GUI
+        def on_path_input(file_path):
+            if file_path and callback:
+                callback(file_path)
+        
+        self.show_custom_dialog("File Path", f"{title}\nEnter full path to image file:", "info", input_field=True, callback=on_path_input)
+    
+    def _process_image_registration(self, username, image_path):
+        """Process image registration with given username and path."""
+        if not image_path:
+            return
+        
+        self.log_user_mgmt_output(f"Registering face from image for user: {username}")
+        self.log_user_mgmt_output(f"Image path: {image_path}")
+        
+        def registration_thread():
+            try:
+                success = self.deepface_auth.register_face(username, image_path)
+                if success:
+                    self.root.after(0, lambda: self.log_user_mgmt_output(f"✅ Face registered successfully for {username}"))
+                    self.root.after(0, lambda: self.show_custom_dialog("Success", f"Face registered successfully for {username}", "info"))
+                else:
+                    self.root.after(0, lambda: self.log_user_mgmt_output(f"❌ Face registration failed for {username}"))
+                    self.root.after(0, lambda: self.show_custom_dialog("Error", f"Face registration failed for {username}", "error"))
+            except Exception as e:
+                self.root.after(0, lambda: self.log_user_mgmt_output(f"❌ Error during face registration: {e}"))
+                self.root.after(0, lambda: self.show_custom_dialog("Error", f"Face registration error: {e}", "error"))
+        
+        threading.Thread(target=registration_thread, daemon=True).start()
+    
+    def list_registered_users(self):
+        """List all registered users."""
+        self.log_user_mgmt_output("Retrieving list of registered users...")
+        
+        def list_thread():
+            try:
+                users = self.deepface_auth.list_registered_users()
+                if users:
+                    self.root.after(0, lambda: self.log_user_mgmt_output(f"✅ Found {len(users)} registered users:"))
+                    for user in users:
+                        if isinstance(user, dict):
+                            user_info = f"  - {user.get('first_name', '')} {user.get('last_name', '')} ({user.get('username', 'N/A')})"
+                            if user.get('email'):
+                                user_info += f" - {user['email']}"
+                            if user.get('role'):
+                                user_info += f" [{user['role']}]"
+                        else:
+                            user_info = f"  - {user}"
+                        self.root.after(0, lambda info=user_info: self.log_user_mgmt_output(info))
+                else:
+                    self.root.after(0, lambda: self.log_user_mgmt_output("No registered users found."))
+            except Exception as e:
+                self.root.after(0, lambda: self.log_user_mgmt_output(f"❌ Error retrieving users: {e}"))
+        
+        threading.Thread(target=list_thread, daemon=True).start()
+    
+    def delete_user_face(self):
+        """Delete a user's face registration."""
+        def on_username_input(username):
+            if not username:
+                return
+            
+            def on_confirmation(confirmed):
+                if not confirmed:
+                    return
+                
+                self.log_user_mgmt_output(f"Deleting user registration for: {username}")
+                
+                def delete_thread():
+                    try:
+                        success = self.deepface_auth.delete_user(username)
+                        if success:
+                            self.root.after(0, lambda: self.log_user_mgmt_output(f"✅ User {username} deleted successfully"))
+                            self.root.after(0, lambda: self.show_custom_dialog("Success", f"User {username} deleted successfully", "info"))
+                        else:
+                            self.root.after(0, lambda: self.log_user_mgmt_output(f"❌ Failed to delete user {username}"))
+                            self.root.after(0, lambda: self.show_custom_dialog("Error", f"Failed to delete user {username}", "error"))
+                    except Exception as e:
+                        self.root.after(0, lambda: self.log_user_mgmt_output(f"❌ Error deleting user: {e}"))
+                        self.root.after(0, lambda: self.show_custom_dialog("Error", f"Error deleting user: {e}", "error"))
+                
+                threading.Thread(target=delete_thread, daemon=True).start()
+            
+            self.show_custom_dialog("Confirm Deletion", f"Are you sure you want to delete user '{username}'?", "yesno", callback=on_confirmation)
+        
+        self.show_custom_dialog("Delete User", "Enter username to delete:", "info", input_field=True, callback=on_username_input)
+    
+    def test_deepface_auth(self):
+        """Test DeepFace recognition authentication."""
+        self.log_user_mgmt_output("Starting DeepFace recognition test...")
+        
+        def test_thread():
+            try:
+                result = self.deepface_auth.authenticate_face(timeout=30)
+                if result:
+                    user_info = f"{result.get('first_name', '')} {result.get('last_name', '')} ({result.get('username', 'N/A')})"
+                    self.root.after(0, lambda: self.log_user_mgmt_output(f"✅ DeepFace authentication successful for user: {user_info}"))
+                    self.root.after(0, lambda: self.log_user_mgmt_output(f"   - Role: {result.get('role', 'N/A')}"))
+                    self.root.after(0, lambda: self.log_user_mgmt_output(f"   - Email: {result.get('email', 'N/A')}"))
+                    if 'euclidean_distance' in result:
+                        self.root.after(0, lambda: self.log_user_mgmt_output(f"   - Euclidean Distance: {result['euclidean_distance']:.4f}"))
+                    if 'cosine_similarity' in result:
+                        self.root.after(0, lambda: self.log_user_mgmt_output(f"   - Cosine Similarity: {result['cosine_similarity']:.4f}"))
+                    success_msg = f"DeepFace authentication successful!\nUser: {user_info}\nRole: {result.get('role', 'N/A')}"
+                    self.root.after(0, lambda: self.show_custom_dialog("Success", success_msg, "info"))
+                else:
+                    self.root.after(0, lambda: self.log_user_mgmt_output("❌ DeepFace authentication failed or timed out"))
+                    self.root.after(0, lambda: self.show_custom_dialog("Failed", "DeepFace authentication failed or timed out", "error"))
+            except Exception as e:
+                self.root.after(0, lambda: self.log_user_mgmt_output(f"❌ DeepFace authentication error: {e}"))
+                self.root.after(0, lambda: self.show_custom_dialog("Error", f"DeepFace authentication error: {e}", "error"))
+        
+        threading.Thread(target=test_thread, daemon=True).start()
+    
+    def test_ldap_auth(self):
+        """Test LDAP authentication."""
+        def on_username_input(username):
+            if not username:
+                return
+            
+            def on_password_input(password):
+                if not password:
+                    return
+                
+                self.log_user_mgmt_output(f"Testing LDAP authentication for user: {username}")
+                
+                def test_thread():
+                    try:
+                        ldap_auth = LDAPAuthenticator(Config())
+                        success, result = ldap_auth.authenticate({
+                            'username': username,
+                            'password': password
+                        })
+                        
+                        if success:
+                            self.root.after(0, lambda: self.log_user_mgmt_output(f"✅ LDAP authentication successful for {username}"))
+                            self.root.after(0, lambda: self.log_user_mgmt_output(f"User info: {result}"))
+                            role = result.get('role', 'Unknown') if isinstance(result, dict) else 'User'
+                            success_msg = f"LDAP authentication successful!\nUser: {username}\nRole: {role}"
+                            self.root.after(0, lambda: self.show_custom_dialog("Success", success_msg, "info"))
+                        else:
+                            self.root.after(0, lambda: self.log_user_mgmt_output(f"❌ LDAP authentication failed: {result}"))
+                            self.root.after(0, lambda: self.show_custom_dialog("Error", f"LDAP authentication failed: {result}", "error"))
+                    except Exception as e:
+                        self.root.after(0, lambda: self.log_user_mgmt_output(f"❌ LDAP authentication error: {e}"))
+                        self.root.after(0, lambda: self.show_custom_dialog("Error", f"LDAP authentication error: {e}", "error"))
+                
+                threading.Thread(target=test_thread, daemon=True).start()
+            
+            self.show_custom_dialog("LDAP Test", "Enter password:", "info", input_field=True, password=True, callback=on_password_input)
+        
+        self.show_custom_dialog("LDAP Test", "Enter username:", "info", input_field=True, callback=on_username_input)
+    
+    def refresh_security_logs(self):
+        """Refresh and display security logs."""
+        self.logs_output.delete(1.0, tk.END)
+        self.logs_output.insert(tk.END, "Loading security logs...\n")
+        self.logs_output.update_idletasks()
+        
+        def load_logs_thread():
+            try:
+                logs_dir = Path("logs")
+                if not logs_dir.exists():
+                    self.root.after(0, lambda: self.display_log_message("❌ Logs directory not found."))
+                    return
+                
+                log_files = sorted(logs_dir.glob("security_log_*.txt"), reverse=True)
+                if not log_files:
+                    self.root.after(0, lambda: self.display_log_message("❌ No security log files found."))
+                    return
+                
+                all_logs = []
+                for log_file in log_files:
+                    try:
+                        with open(log_file, 'r', encoding='utf-8') as f:
+                            lines = f.readlines()
+                            for line in lines:
+                                all_logs.append(line.strip())
+                    except Exception as e:
+                        all_logs.append(f"❌ Error reading {log_file.name}: {e}")
+                
+                # Sort logs by timestamp (most recent first)
+                all_logs.reverse()
+                
+                self.root.after(0, lambda: self.display_logs(all_logs))
+                
+            except Exception as e:
+                self.root.after(0, lambda: self.display_log_message(f"❌ Error loading logs: {e}"))
+        
+        threading.Thread(target=load_logs_thread, daemon=True).start()
+    
+    def filter_logs_by_date(self, filter_type):
+        """Filter logs by date."""
+        if filter_type == "today":
+            today = datetime.now().strftime("%Y-%m-%d")
+            self.logs_output.delete(1.0, tk.END)
+            self.logs_output.insert(tk.END, f"Loading logs for {today}...\n")
+        else:
+            self.refresh_security_logs()
+            return
+        
+        def filter_logs_thread():
+            try:
+                logs_dir = Path("logs")
+                today_file = logs_dir / f"security_log_{today}.txt"
+                
+                if not today_file.exists():
+                    self.root.after(0, lambda: self.display_log_message(f"❌ No logs found for {today}."))
+                    return
+                
+                with open(today_file, 'r', encoding='utf-8') as f:
+                    lines = f.readlines()
+                    logs = [line.strip() for line in lines if line.strip()]
+                
+                logs.reverse()  # Most recent first
+                self.root.after(0, lambda: self.display_logs(logs))
+                
+            except Exception as e:
+                self.root.after(0, lambda: self.display_log_message(f"❌ Error filtering logs: {e}"))
+        
+        threading.Thread(target=filter_logs_thread, daemon=True).start()
+    
+    def display_logs(self, logs):
+        """Display logs in the text widget."""
+        self.logs_output.delete(1.0, tk.END)
+        
+        if not logs:
+            self.logs_output.insert(tk.END, "No log entries found.\n")
+            return
+        
+        self.logs_output.insert(tk.END, f"📋 Security Log Entries ({len(logs)} entries)\n")
+        self.logs_output.insert(tk.END, "=" * 80 + "\n\n")
+        
+        for log_entry in logs:
+            if log_entry:
+                # Color code different types of events
+                if "AUTH_SUCCESS" in log_entry:
+                    self.logs_output.insert(tk.END, f"✅ {log_entry}\n", "success")
+                elif "AUTH_FAILED" in log_entry or "FAILED" in log_entry:
+                    self.logs_output.insert(tk.END, f"❌ {log_entry}\n", "error")
+                elif "SYSTEM_START" in log_entry:
+                    self.logs_output.insert(tk.END, f"🚀 {log_entry}\n", "system")
+                elif "LOGOUT" in log_entry:
+                    self.logs_output.insert(tk.END, f"🚪 {log_entry}\n", "logout")
+                else:
+                    self.logs_output.insert(tk.END, f"ℹ️ {log_entry}\n")
+                self.logs_output.insert(tk.END, "\n")
+        
+        # Configure tags for colored text
+        self.logs_output.tag_config("success", foreground="lightgreen")
+        self.logs_output.tag_config("error", foreground="lightcoral")
+        self.logs_output.tag_config("system", foreground="lightblue")
+        self.logs_output.tag_config("logout", foreground="yellow")
+        
+        self.logs_output.see(tk.END)
+    
+    def display_log_message(self, message):
+        """Display a simple message in the logs output."""
+        self.logs_output.delete(1.0, tk.END)
+        self.logs_output.insert(tk.END, message + "\n")
+    
+    def minimize_to_system_tray(self):
+        """Minimize GUI to system tray."""
+        self.root.iconify()
+        SecurityUtils.log_security_event("GUI_MINIMIZED", f"User {self.current_user} minimized GUI to system tray")
+        print("GUI minimized to system tray. Detection system continues running.")
+    
+    def logout(self):
+        """Logout and return to authentication screen."""
+        def on_confirmation(confirmed):
+            if confirmed:
+                self.is_authenticated = False
+                current_user_temp = self.current_user  # Store for logging
+                self.current_user = None
+                self.current_role = None
+                
+                if self.auth_manager:
+                    self.auth_manager.logout()
+                
+                SecurityUtils.log_security_event("GUI_LOGOUT", f"User {current_user_temp} logged out")
+                
+                # Return to login screen
+                self.show_login_screen()
+        
+        self.show_custom_dialog("Logout", "Are you sure you want to logout?", "yesno", callback=on_confirmation)
     
     def show_auth_failure(self, error_message):
         """Show authentication failure screen."""
@@ -733,95 +1598,9 @@ class SecurityGUI:
         )
         retry_btn.pack(pady=30)
     
-    def show_main_dashboard(self):
-        """Show main system dashboard."""
-        self.clear_screen()
-        self.current_screen = "dashboard"
-        
-        # Main container
-        main_frame = tk.Frame(self.root, bg='navy')
-        main_frame.pack(expand=True, fill='both')
-        
-        # Header
-        header_frame = tk.Frame(main_frame, bg='darkblue', height=80)
-        header_frame.pack(fill='x')
-        header_frame.pack_propagate(False)
-        
-        # Title and user info
-        title_label = tk.Label(
-            header_frame,
-            text="🔒 PHYSICAL SECURITY SYSTEM - ACTIVE",
-            fg="white",
-            bg="darkblue",
-            font=("Helvetica", 18, "bold")
-        )
-        title_label.pack(side='left', padx=20, pady=20)
-        
-        user_label = tk.Label(
-            header_frame,
-            text=f"User: {self.current_user} | Status: AUTHENTICATED",
-            fg="lightgreen",
-            bg="darkblue",
-            font=("Helvetica", 12)
-        )
-        user_label.pack(side='right', padx=20, pady=20)
-        
-        # Content area
-        content_frame = tk.Frame(main_frame, bg='navy')
-        content_frame.pack(expand=True, fill='both', padx=20, pady=20)
-        
-        # Status message
-        status_label = tk.Label(
-            content_frame,
-            text="✅ Authentication Complete\n🔍 Object Detection System Starting...\n📹 Camera Monitoring Active\n🔒 Security Overlay Ready",
-            fg="white",
-            bg="navy",
-            font=("Helvetica", 16),
-            justify='left'
-        )
-        status_label.pack(pady=50)
-        
-        # Minimize to tray button
-        minimize_btn = tk.Button(
-            content_frame,
-            text="⬇ Minimize to System Tray",
-            command=self.minimize_to_system_tray,
-            font=("Helvetica", 12, "bold"),
-            bg="gray",
-            fg="white",
-            width=25,
-            height=2
-        )
-        minimize_btn.pack(pady=20)
-        
-        # Logout button
-        logout_btn = tk.Button(
-            content_frame,
-            text="🚪 Logout",
-            command=self.logout,
-            font=("Helvetica", 12, "bold"),
-            bg="red",
-            fg="white",
-            width=25,
-            height=2
-        )
-        logout_btn.pack(pady=10)
-    
-    def minimize_to_system_tray(self):
-        """Minimize GUI to system tray."""
-        self.root.iconify()
-        print("GUI minimized to system tray. Detection system continues running.")
-    
-    def logout(self):
-        """Logout and return to authentication screen."""
-        self.is_authenticated = False
-        self.current_user = None
-        SecurityUtils.log_security_event("GUI_LOGOUT", "User logged out from GUI")
-        self.show_login_screen()
-    
     def show_security_error(self, title, message):
         """Show security error dialog."""
-        messagebox.showerror(title, message, parent=self.root)
+        self.show_custom_dialog(title, message, "error")
 
 
 if __name__ == "__main__":

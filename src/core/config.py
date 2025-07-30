@@ -75,7 +75,7 @@ class Config:
         Path(cls.LOGS_DIR).mkdir(exist_ok=True)
 
     # LDAP Configuration
-    LDAP_SERVER = "ldap://192.168.1.4"  
+    LDAP_SERVER = "ldap://192.168.1.5"  
     LDAP_BASE_DN = "security-local.com"    
     LDAP_DOMAIN = "security-local"  # Domain for NTLM authentication
     LDAP_ADMIN_GROUP = "SecurityAdmins"
@@ -88,7 +88,7 @@ class Config:
 
     # Authentication Configuration
     AUTHENTICATION_REQUIRED = True  # Set to False for development/testing without authentication
-    AUTHENTICATION_METHODS = ["email_password", "fingerprint", "face"]
+    AUTHENTICATION_METHODS = ["email_password", "fingerprint", "deepface"]
     SESSION_TIMEOUT = 8 * 60 * 60  # 8 hours in seconds
     MAX_LOGIN_ATTEMPTS = 3
     LOGIN_LOCKOUT_DURATION = 300  # 5 minutes in seconds
@@ -97,6 +97,14 @@ class Config:
     FACE_RECOGNITION_TOLERANCE = 0.6
     FACE_ENCODING_MODEL = "large"  # or "small" for faster processing
     FACE_IMAGES_DIR = "face_data"
+    
+    # DeepFace Settings (Advanced Face Recognition)
+    DEEPFACE_DETECTOR_BACKEND = "opencv"  # opencv, ssd, dlib, mtcnn, retinaface
+    DEEPFACE_MODEL_NAME = "Facenet"  # VGG-Face, Facenet, Facenet512, OpenFace, DeepFace, DeepID, ArcFace, Dlib
+    DEEPFACE_NORMALIZATION = "base"  # base, raw, Facenet, Facenet2018, VGGFace, VGGFace2, ArcFace
+    DEEPFACE_CONFIDENCE_THRESHOLD = 0.85
+    DEEPFACE_EUCLIDEAN_THRESHOLD = 10.0
+    DEEPFACE_COSINE_THRESHOLD = 0.40
     
     # Fingerprint Settings
     FINGERPRINT_ENABLED = True
