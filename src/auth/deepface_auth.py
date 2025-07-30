@@ -9,6 +9,8 @@ import json
 import base64
 import sqlite3
 import numpy as np
+import hashlib
+import secrets
 from pathlib import Path
 from typing import Dict, Optional, Tuple, List
 from io import BytesIO
@@ -26,6 +28,7 @@ except ImportError:
 from ..core.config import Config
 from ..core.base import BaseAuthenticator
 from ..utils.security_utils import SecurityUtils
+from .ldap_auth import LDAPAuthenticator
 
 
 class DeepFaceAuthenticator(BaseAuthenticator):
@@ -66,6 +69,8 @@ class DeepFaceAuthenticator(BaseAuthenticator):
                     last_name TEXT,
                     email TEXT,
                     role TEXT DEFAULT 'user',
+                    password_hash TEXT,
+                    salt TEXT,
                     embedding TEXT NOT NULL,
                     face_image BLOB,
                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
@@ -76,12 +81,71 @@ class DeepFaceAuthenticator(BaseAuthenticator):
             # Create index for faster searches
             cursor.execute('CREATE INDEX IF NOT EXISTS idx_username ON faces(username)')
             
+            # Check if we need to add password columns to existing table
+            cursor.execute("PRAGMA table_info(faces)")
+            columns = [column[1] for column in cursor.fetchall()]
+            
+            if 'password_hash' not in columns:
+                cursor.execute('ALTER TABLE faces ADD COLUMN password_hash TEXT')
+                print("Added password_hash column to faces table")
+            
+            if 'salt' not in columns:
+                cursor.execute('ALTER TABLE faces ADD COLUMN salt TEXT')
+                print("Added salt column to faces table")
+            
             conn.commit()
             conn.close()
             print(f"DeepFace database initialized at: {self.db_path}")
             
         except Exception as e:
             print(f"Error initializing database: {e}")
+
+    def _encrypt_password(self, password: str) -> Tuple[str, str]:
+        """Encrypt password using PBKDF2 with salt."""
+        salt = secrets.token_hex(32)
+        password_hash = hashlib.pbkdf2_hmac('sha256', password.encode('utf-8'), 
+                                           bytes.fromhex(salt), 100000)
+        return base64.b64encode(password_hash).decode('utf-8'), salt
+
+    def _verify_password(self, password: str, password_hash: str, salt: str) -> bool:
+        """Verify password against stored hash."""
+        try:
+            computed_hash = hashlib.pbkdf2_hmac('sha256', password.encode('utf-8'), 
+                                               bytes.fromhex(salt), 100000)
+            stored_hash = base64.b64decode(password_hash.encode('utf-8'))
+            return secrets.compare_digest(computed_hash, stored_hash)
+        except Exception as e:
+            print(f"Error verifying password: {e}")
+            return False
+
+    def _authenticate_with_ldap(self, username: str, password: str) -> Tuple[bool, Optional[Dict]]:
+        """Authenticate user with LDAP using stored credentials."""
+        try:
+            ldap_auth = LDAPAuthenticator(Config())
+            
+            # Try direct authentication first
+            success, result = ldap_auth.authenticate({
+                'username': username,
+                'password': password,
+                'domain': Config.LDAP_DOMAIN if hasattr(Config, 'LDAP_DOMAIN') else ''
+            })
+            
+            if success:
+                return True, result
+            
+            # If direct authentication fails, try with domain prefix
+            domain_username = f"{Config.LDAP_DOMAIN}\\{username}" if hasattr(Config, 'LDAP_DOMAIN') else username
+            success, result = ldap_auth.authenticate({
+                'username': domain_username,
+                'password': password,
+                'domain': Config.LDAP_DOMAIN if hasattr(Config, 'LDAP_DOMAIN') else ''
+            })
+            
+            return success, result
+            
+        except Exception as e:
+            print(f"LDAP authentication error: {e}")
+            return False, f"LDAP authentication failed: {str(e)}"
 
     def preprocess_image(self, image: np.ndarray) -> np.ndarray:
         """Preprocess image for better face recognition."""
@@ -146,11 +210,38 @@ class DeepFaceAuthenticator(BaseAuthenticator):
             print(f"Error extracting face embedding: {e}")
             return None, 0.0
 
+    def check_camera_availability(self) -> tuple[bool, str]:
+        """Check if camera is available for use."""
+        try:
+            # Try different backends to test camera availability
+            backends = [cv2.CAP_DSHOW, cv2.CAP_MSMF, cv2.CAP_ANY]
+            
+            for backend in backends:
+                try:
+                    cap = cv2.VideoCapture(Config.DEFAULT_CAMERA_INDEX, backend)
+                    if cap.isOpened():
+                        ret, frame = cap.read()
+                        cap.release()
+                        if ret and frame is not None:
+                            return True, f"Camera available (Backend: {backend})"
+                    if cap:
+                        cap.release()
+                except Exception as e:
+                    continue
+            
+            return False, "Camera not available - may be in use by another process"
+        except Exception as e:
+            return False, f"Camera check failed: {str(e)}"
+
     def register_face(self, username: str, first_name: str = "", last_name: str = "", 
-                     email: str = "", role: str = "user", image_path: str = None) -> bool:
-        """Register a face for the given user."""
+                     email: str = "", role: str = "user", password: str = "", image_path: str = None) -> bool:
+        """Register a face for the given user with encrypted password."""
         if not DEEPFACE_AVAILABLE:
             print("DeepFace not available")
+            return False
+        
+        if not password:
+            print("Password is required for face registration")
             return False
         
         try:
@@ -186,6 +277,9 @@ class DeepFaceAuthenticator(BaseAuthenticator):
                 pil_image.save(buffered, format="PNG")
                 face_image_binary = buffered.getvalue()
             
+            # Encrypt password
+            password_hash, salt = self._encrypt_password(password)
+            
             # Store in database
             conn = sqlite3.connect(self.db_path)
             cursor = conn.cursor()
@@ -199,17 +293,18 @@ class DeepFaceAuthenticator(BaseAuthenticator):
                 cursor.execute('''
                     UPDATE faces 
                     SET first_name = ?, last_name = ?, email = ?, role = ?, 
-                        embedding = ?, face_image = ?, updated_at = CURRENT_TIMESTAMP
+                        password_hash = ?, salt = ?, embedding = ?, face_image = ?, updated_at = CURRENT_TIMESTAMP
                     WHERE username = ?
-                ''', (first_name, last_name, email, role, json.dumps(embedding), 
-                      face_image_binary, username))
+                ''', (first_name, last_name, email, role, password_hash, salt, 
+                      json.dumps(embedding), face_image_binary, username))
                 print(f"Updated face registration for {username}")
             else:
                 # Insert new user
                 cursor.execute('''
-                    INSERT INTO faces (username, first_name, last_name, email, role, embedding, face_image)
-                    VALUES (?, ?, ?, ?, ?, ?, ?)
-                ''', (username, first_name, last_name, email, role, json.dumps(embedding), face_image_binary))
+                    INSERT INTO faces (username, first_name, last_name, email, role, password_hash, salt, embedding, face_image)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ''', (username, first_name, last_name, email, role, password_hash, salt, 
+                      json.dumps(embedding), face_image_binary))
                 print(f"New face registered for {username}")
             
             conn.commit()
@@ -227,47 +322,115 @@ class DeepFaceAuthenticator(BaseAuthenticator):
 
     def capture_face_from_camera(self) -> Optional[np.ndarray]:
         """Capture face from camera for registration."""
-        cap = cv2.VideoCapture(Config.DEFAULT_CAMERA_INDEX)
-        if not cap.isOpened():
-            print("Cannot access camera")
+        cap = None
+        max_retries = 3
+        retry_delay = 1.0
+        
+        # Try multiple camera backends to handle conflicts
+        backends = [cv2.CAP_DSHOW, cv2.CAP_MSMF, cv2.CAP_ANY]
+        
+        for backend in backends:
+            for attempt in range(max_retries):
+                try:
+                    print(f"Attempting to access camera (Backend: {backend}, Attempt: {attempt + 1}/{max_retries})")
+                    cap = cv2.VideoCapture(Config.DEFAULT_CAMERA_INDEX, backend)
+                    
+                    # Set camera properties for better stability
+                    cap.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
+                    cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
+                    cap.set(cv2.CAP_PROP_FPS, 15)
+                    cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
+                    
+                    if cap.isOpened():
+                        # Test if we can actually read a frame
+                        ret, test_frame = cap.read()
+                        if ret and test_frame is not None:
+                            print("Camera access successful!")
+                            break
+                        else:
+                            print("Camera opened but cannot read frames")
+                            cap.release()
+                            cap = None
+                    else:
+                        print("Cannot open camera")
+                        if cap:
+                            cap.release()
+                        cap = None
+                        
+                except Exception as e:
+                    print(f"Camera access error: {e}")
+                    if cap:
+                        cap.release()
+                    cap = None
+                
+                if cap is None and attempt < max_retries - 1:
+                    print(f"Retrying in {retry_delay} seconds...")
+                    time.sleep(retry_delay)
+            
+            if cap is not None:
+                break
+        
+        if cap is None:
+            print("ERROR: Cannot access camera after all attempts.")
+            print("Possible causes:")
+            print("- Camera is being used by another application (detection system)")
+            print("- Camera driver issues")
+            print("- Insufficient permissions")
             return None
         
         print("Position your face in front of the camera and press SPACE to capture, ESC to cancel")
+        frame_count = 0
+        last_face_detected = False
         
         while True:
-            ret, frame = cap.read()
-            if not ret:
-                break
-            
-            # Show preview with face detection rectangle
             try:
-                # Try to detect face for preview
-                faces = DeepFace.extract_faces(frame, detector_backend=self.detector_backend, 
-                                             enforce_detection=False)
-                if faces and len(faces) > 0:
-                    # Draw rectangle around detected face area
-                    h, w = frame.shape[:2]
-                    cv2.rectangle(frame, (w//4, h//4), (3*w//4, 3*h//4), (0, 255, 0), 2)
-                    cv2.putText(frame, "Face Detected - Press SPACE to capture", 
-                              (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
-                else:
-                    cv2.putText(frame, "No face detected", 
-                              (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 255), 2)
-            except:
-                # If face detection fails, just show the frame
-                pass
-            
-            cv2.putText(frame, "SPACE: Capture, ESC: Cancel", 
-                       (10, frame.shape[0] - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
-            
-            cv2.imshow("Face Registration", frame)
-            
-            key = cv2.waitKey(1) & 0xFF
-            if key == ord(' '):  # Space to capture
-                cap.release()
-                cv2.destroyAllWindows()
-                return frame
-            elif key == 27:  # ESC to cancel
+                ret, frame = cap.read()
+                if not ret or frame is None:
+                    print("Warning: Frame read failed, retrying...")
+                    continue
+                
+                frame_count += 1
+                
+                # Show preview with face detection rectangle
+                try:
+                    if frame_count % 5 == 0:  # Only check face every 5 frames for performance
+                        # Try to detect face for preview
+                        faces = DeepFace.extract_faces(frame, detector_backend=self.detector_backend, 
+                                                     enforce_detection=False)
+                        last_face_detected = faces and len(faces) > 0
+                    
+                    if last_face_detected:
+                        # Draw rectangle around detected face area
+                        h, w = frame.shape[:2]
+                        cv2.rectangle(frame, (w//4, h//4), (3*w//4, 3*h//4), (0, 255, 0), 2)
+                        cv2.putText(frame, "Face Detected - Press SPACE to capture", 
+                                  (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
+                    else:
+                        cv2.putText(frame, "Position your face in the frame", 
+                                  (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 255), 2)
+                except Exception as e:
+                    # If face detection fails, just show the frame
+                    cv2.putText(frame, "Camera active - Press SPACE to capture", 
+                              (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2)
+                
+                cv2.putText(frame, "SPACE: Capture, ESC: Cancel", 
+                           (10, frame.shape[0] - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
+                
+                cv2.imshow("Face Registration", frame)
+                
+                key = cv2.waitKey(1) & 0xFF
+                if key == ord(' '):  # Space to capture
+                    print("Face captured!")
+                    captured_frame = frame.copy()
+                    cap.release()
+                    cv2.destroyAllWindows()
+                    return captured_frame
+                elif key == 27:  # ESC to cancel
+                    print("Face capture cancelled")
+                    break
+                    
+            except Exception as e:
+                print(f"Error during camera capture: {e}")
                 break
         
         cap.release()
@@ -320,9 +483,33 @@ class DeepFaceAuthenticator(BaseAuthenticator):
                     cap.release()
                     cv2.destroyAllWindows()
                     
-                    SecurityUtils.log_security_event("DEEPFACE_AUTH_SUCCESS", 
-                                                   f"Face authentication successful for: {match_result['username']}")
-                    return match_result
+                    # Try LDAP authentication with stored credentials
+                    username = match_result['username']
+                    password_hash = match_result.get('password_hash')
+                    salt = match_result.get('salt')
+                    
+                    if password_hash and salt:
+                        # We need the original password to authenticate with LDAP
+                        # Since we can't decrypt the hash, we'll use a different approach
+                        # For now, let's try to authenticate with the username only
+                        # In a real scenario, you might want to implement a separate password prompt
+                        print(f"Face recognized as {username}, attempting LDAP authentication...")
+                        
+                        # Note: Since we store encrypted passwords, we can't retrieve the original
+                        # In a production system, you might want to:
+                        # 1. Prompt for password after face recognition
+                        # 2. Use cached credentials if previously entered
+                        # 3. Use certificate-based authentication
+                        
+                        # For now, we'll return the match and let the caller handle LDAP auth
+                        SecurityUtils.log_security_event("DEEPFACE_AUTH_SUCCESS", 
+                                                       f"Face authentication successful for: {username}")
+                        return match_result
+                    else:
+                        print(f"No stored credentials for {username}")
+                        SecurityUtils.log_security_event("DEEPFACE_AUTH_SUCCESS", 
+                                                       f"Face authentication successful for: {username} (no stored credentials)")
+                        return match_result
                 
                 # Show frame with authentication status
                 cv2.putText(frame, f"Face detected (conf: {confidence:.2f})", 
@@ -346,14 +533,81 @@ class DeepFaceAuthenticator(BaseAuthenticator):
         SecurityUtils.log_security_event("DEEPFACE_AUTH_FAILED", "Face authentication failed or cancelled")
         return None
 
+    def authenticate_face_with_ldap(self, timeout: int = 30) -> Optional[Dict[str, any]]:
+        """Authenticate using face recognition and then LDAP authentication."""
+        # First, authenticate the face
+        face_result = self.authenticate_face(timeout)
+        
+        if not face_result:
+            return None
+        
+        username = face_result['username']
+        password_hash = face_result.get('password_hash')
+        salt = face_result.get('salt')
+        
+        if not password_hash or not salt:
+            print(f"No stored credentials for {username}. Face authentication successful but cannot proceed with LDAP.")
+            return face_result
+        
+        # Since we can't decrypt the password hash, we need to prompt for password
+        # In a GUI environment, you would show a password dialog here
+        print(f"Face recognized as {username}. Please enter password for LDAP authentication:")
+        
+        # For now, we'll return the face result and let the GUI handle password prompt
+        # The GUI can then call authenticate_with_ldap directly
+        face_result['requires_password'] = True
+        return face_result
+
+    def authenticate_user_with_stored_password(self, username: str, entered_password: str) -> Optional[Dict[str, any]]:
+        """Authenticate user by verifying stored password and then LDAP."""
+        try:
+            conn = sqlite3.connect(self.db_path)
+            cursor = conn.cursor()
+            
+            cursor.execute("SELECT password_hash, salt, first_name, last_name, email, role FROM faces WHERE username = ?", 
+                         (username,))
+            result = cursor.fetchone()
+            conn.close()
+            
+            if not result:
+                return None
+            
+            password_hash, salt, first_name, last_name, email, role = result
+            
+            # Verify the entered password matches stored hash
+            if not self._verify_password(entered_password, password_hash, salt):
+                SecurityUtils.log_security_event("AUTH_FAILED", f"Password verification failed for {username}")
+                return None
+            
+            # Now try LDAP authentication
+            if self._authenticate_with_ldap(username, entered_password):
+                user_data = {
+                    'username': username,
+                    'first_name': first_name or '',
+                    'last_name': last_name or '',
+                    'email': email or '',
+                    'role': role or 'user',
+                    'auth_method': 'face_and_ldap'
+                }
+                SecurityUtils.log_security_event("AUTH_SUCCESS", f"Face + LDAP authentication successful for {username}")
+                return user_data
+            else:
+                SecurityUtils.log_security_event("LDAP_AUTH_FAILED", f"LDAP authentication failed for {username}")
+                return None
+                
+        except Exception as e:
+            print(f"Error in authenticate_user_with_stored_password: {e}")
+            SecurityUtils.log_security_event("AUTH_ERROR", f"Authentication error for {username}: {str(e)}")
+            return None
+
     def find_face_match(self, query_embedding: List[float]) -> Optional[Dict[str, any]]:
         """Find matching face in database using similarity search."""
         try:
             conn = sqlite3.connect(self.db_path)
             cursor = conn.cursor()
             
-            # Get all face embeddings from database
-            cursor.execute("SELECT username, first_name, last_name, email, role, embedding FROM faces")
+            # Get all face embeddings from database including password data
+            cursor.execute("SELECT username, first_name, last_name, email, role, embedding, password_hash, salt FROM faces")
             faces = cursor.fetchall()
             conn.close()
             
@@ -365,7 +619,7 @@ class DeepFaceAuthenticator(BaseAuthenticator):
             
             query_embedding = np.array(query_embedding)
             
-            for username, first_name, last_name, email, role, embedding_str in faces:
+            for username, first_name, last_name, email, role, embedding_str, password_hash, salt in faces:
                 try:
                     stored_embedding = np.array(json.loads(embedding_str))
                     
@@ -392,6 +646,8 @@ class DeepFaceAuthenticator(BaseAuthenticator):
                             'last_name': last_name or '',
                             'email': email or '',
                             'role': role or 'user',
+                            'password_hash': password_hash,
+                            'salt': salt,
                             'euclidean_distance': euclidean_distance,
                             'cosine_similarity': cosine_similarity,
                             'weighted_score': weighted_score

@@ -16,33 +16,6 @@ from src.utils.security_utils import SecurityUtils
 from src.ui.gui_manager import SecurityGUI
 
 
-def start_detection_system(gui):
-    """Start the main detection system after GUI authentication."""
-    # Wait for authentication to complete
-    while not gui.is_ready_for_detection():
-        time.sleep(0.5)
-    
-    try:
-        print("✅ Authentication successful. Starting security monitoring...")
-        SecurityUtils.log_security_event("DETECTION_SYSTEM_START", "Main detection system starting after GUI authentication")
-        
-        # Initialize and start the detector service
-        detector_service = DetectorService()
-        
-        # Mark that GUI authentication was completed
-        detector_service.set_gui_authenticated(True)
-        
-        # Start the main detection loop with camera source (0) instead of default video
-        #detector_service.run_detection(source=0, view_img=True)
-        detector_service.inference(**vars(detector_service.parse_opt()))
-        
-    except Exception as e:
-        print(f"❌ Detection system error: {e}")
-        SecurityUtils.log_security_event("DETECTION_SYSTEM_ERROR", f"Detection system error: {e}")
-        import traceback
-        traceback.print_exc()
-
-
 if __name__ == "__main__":
     SecurityUtils.log_security_event("SYSTEM_START", "Physical Security System starting with GUI")
     
@@ -51,17 +24,13 @@ if __name__ == "__main__":
         if Config.AUTHENTICATION_REQUIRED:
             print("🔐 Starting Physical Security System with GUI Authentication...")
             
-            # Create and start the GUI
-            gui = SecurityGUI()
+            # Create detector service instance
+            detector_service = DetectorService()
+            detector_service.set_gui_authenticated(True)
             
-            # Start detection system in background thread (will wait for auth)
-            detection_thread = threading.Thread(
-                target=start_detection_system, 
-                args=(gui,), 
-                daemon=True
-            )
-            detection_thread.start()
-            
+            # Create GUI with detector service reference
+            gui = SecurityGUI(detector_service=detector_service)
+
             # Run the GUI (blocking call)
             gui.run()
             
@@ -69,7 +38,6 @@ if __name__ == "__main__":
             print("⚠️  Warning: Authentication disabled. Starting without GUI...")
             # Run without authentication (development mode)
             detector_service = DetectorService()
-            #detector_service.run_detection(source=0, view_img=True)
             detector_service.inference(**vars(detector_service.parse_opt()))
             
     except KeyboardInterrupt:

@@ -20,15 +20,18 @@ from ..auth.deepface_auth import DeepFaceAuthenticator
 class SecurityGUI:
     """Main GUI class for the Physical Security System."""
     
-    def __init__(self, auth_manager=None):
+    def __init__(self, auth_manager=None, detector_service=None):
         """Initialize the GUI."""
         self.root = tk.Tk()
         self.auth_manager = auth_manager
         self.deepface_auth = DeepFaceAuthenticator()
+        self.detector_service = detector_service  # Reference to detection service
         self.is_authenticated = False
         self.current_user = None
         self.current_role = None
         self.current_screen = None
+        self.is_minimized = False
+        self.detection_running = False
         
         # Configure main window
         self.setup_window()
@@ -51,6 +54,9 @@ class SecurityGUI:
         self.root.bind('<Alt-F4>', lambda e: None)
         self.root.bind('<Control-c>', lambda e: None)
         self.root.bind('<Control-C>', lambda e: None)
+        
+        # Setup window event handlers for minimize/restore detection
+        self.setup_window_events()
         
     def maintain_security_properties(self):
         """Ensure security properties are maintained - call this periodically."""
@@ -708,7 +714,14 @@ class SecurityGUI:
                 if result:
                     username = result['username']
                     role = result.get('role', 'user')
-                    self.root.after(0, lambda: self.handle_auth_result(True, username, "deepface", role))
+                    
+                    # Check if password is required for LDAP authentication
+                    if result.get('requires_password') or (result.get('password_hash') and result.get('salt')):
+                        # Face recognized, now need password for LDAP
+                        self.root.after(0, lambda: self.prompt_password_for_ldap(username, result))
+                    else:
+                        # Face authentication only (no stored password)
+                        self.root.after(0, lambda: self.handle_auth_result(True, username, "deepface", role))
                 else:
                     self.root.after(0, lambda: self.handle_auth_result(False, None, "deepface", "Face not recognized by AI"))
             except Exception as e:
@@ -716,6 +729,119 @@ class SecurityGUI:
                 self.root.after(0, lambda: self.handle_auth_result(False, None, "deepface", error_msg))
         
         threading.Thread(target=auth_thread, daemon=True).start()
+    
+    def prompt_password_for_ldap(self, username, face_result):
+        """Prompt for password after successful face recognition for LDAP authentication."""
+        self.clear_screen()
+        self.current_screen = "password_prompt"
+        
+        # Center frame
+        center_frame = tk.Frame(self.root, bg='black')
+        center_frame.pack(expand=True)
+        
+        # Title
+        title_label = tk.Label(
+            center_frame,
+            text=f"Face Recognized: {username}",
+            fg="cyan",
+            bg="black",
+            font=("Helvetica", 24, "bold")
+        )
+        title_label.pack(pady=30)
+        
+        # Subtitle
+        subtitle_label = tk.Label(
+            center_frame,
+            text="Enter password for domain authentication",
+            fg="white",
+            bg="black",
+            font=("Helvetica", 14)
+        )
+        subtitle_label.pack(pady=10)
+        
+        # Password entry
+        password_frame = tk.Frame(center_frame, bg='black')
+        password_frame.pack(pady=30)
+        
+        password_entry = tk.Entry(
+            password_frame,
+            font=("Helvetica", 16),
+            width=25,
+            show="*",
+            bg="white",
+            fg="black",
+            insertbackground="black"
+        )
+        password_entry.pack(pady=10)
+        password_entry.focus()
+        
+        # Status label
+        status_label = tk.Label(
+            center_frame,
+            text="",
+            fg="red",
+            bg="black",
+            font=("Helvetica", 12)
+        )
+        status_label.pack(pady=10)
+        
+        # Buttons frame
+        button_frame = tk.Frame(center_frame, bg='black')
+        button_frame.pack(pady=20)
+        
+        def authenticate_with_password():
+            password = password_entry.get().strip()
+            if not password:
+                status_label.config(text="Password cannot be empty")
+                return
+            
+            status_label.config(text="Authenticating with domain...", fg="yellow")
+            
+            def ldap_auth_thread():
+                try:
+                    result = self.deepface_auth.authenticate_user_with_stored_password(username, password)
+                    if result:
+                        role = result.get('role', 'user')
+                        self.root.after(0, lambda: self.handle_auth_result(True, username, "face_and_ldap", role))
+                    else:
+                        self.root.after(0, lambda: status_label.config(text="Invalid password or domain authentication failed", fg="red"))
+                except Exception as e:
+                    error_msg = f"Authentication error: {str(e)}"
+                    self.root.after(0, lambda: status_label.config(text=error_msg, fg="red"))
+            
+            threading.Thread(target=ldap_auth_thread, daemon=True).start()
+        
+        def cancel_auth():
+            self.show_auth_selection()
+        
+        # Login button
+        login_btn = tk.Button(
+            button_frame,
+            text="Authenticate",
+            command=authenticate_with_password,
+            font=("Helvetica", 14, "bold"),
+            bg="green",
+            fg="white",
+            padx=20,
+            pady=10
+        )
+        login_btn.pack(side=tk.LEFT, padx=10)
+        
+        # Cancel button
+        cancel_btn = tk.Button(
+            button_frame,
+            text="Cancel",
+            command=cancel_auth,
+            font=("Helvetica", 14),
+            bg="red",
+            fg="white",
+            padx=20,
+            pady=10
+        )
+        cancel_btn.pack(side=tk.LEFT, padx=10)
+        
+        # Bind Enter key to authenticate
+        password_entry.bind('<Return>', lambda e: authenticate_with_password())
     
     def show_auth_loading(self, message):
         """Show authentication loading screen."""
@@ -858,9 +984,13 @@ class SecurityGUI:
         )
         welcome_label.pack()
         
+        # Dynamic status based on detection state
+        detection_status = "🔍 Detection: Inactive (GUI active)" if not self.detection_running else "🔍 Detection: Active"
+        camera_status = "📹 Camera: Available for Face Registration" if not self.detection_running else "📹 Camera: In use by Detection"
+        
         status_label = tk.Label(
             welcome_frame,
-            text="✅ Authentication Complete\n🔍 Object Detection System Ready\n📹 Camera Monitoring Available",
+            text=f"✅ Authentication Complete\n{detection_status}\n{camera_status}\n💡 Minimize window to start detection\n⌨️  Press Ctrl+Shift+R to restore from tray",
             fg="lightgray",
             bg="darkblue",
             font=("Helvetica", 14),
@@ -933,12 +1063,12 @@ class SecurityGUI:
         # Minimize to tray button (right beside logout)
         minimize_btn = tk.Button(
             bottom_frame,
-            text="⬇ Minimize to System Tray",
+            text="⬇ Minimize & Start Detection",
             command=self.minimize_to_system_tray,
             font=("Helvetica", 12, "bold"),
-            bg="gray",
+            bg="darkgreen",
             fg="white",
-            width=20,
+            width=25,
             height=2
         )
         minimize_btn.pack(side='right', padx=10)
@@ -1098,6 +1228,16 @@ class SecurityGUI:
         self.user_mgmt_output.config(yscrollcommand=scrollbar.set)
         
         self.log_user_mgmt_output("User Management interface loaded. Select an operation above.")
+        
+        # Show camera/detection status
+        if self.detection_running:
+            self.log_user_mgmt_output("⚠️  WARNING: Detection system is currently running")
+            self.log_user_mgmt_output("📹 Camera is being used by detection system")
+            self.log_user_mgmt_output("💡 Face registration from camera may fail")
+            self.log_user_mgmt_output("🔧 Consider using 'Register Face (Image)' instead")
+        else:
+            self.log_user_mgmt_output("✅ Camera available for face registration")
+            self.log_user_mgmt_output("📹 Detection system inactive - GUI mode active")
     
     def show_security_logs(self):
         """Show the security logs interface within the GUI."""
@@ -1224,34 +1364,104 @@ class SecurityGUI:
             if not username:
                 return
             
-            self.log_user_mgmt_output(f"Starting face registration for user: {username}")
+            def on_password_input(password):
+                if not password:
+                    return
+                
+                self.log_user_mgmt_output(f"Starting face registration for user: {username}")
+                self.log_user_mgmt_output("⚠️  Important: If detection system is running, camera access may conflict")
+                self.log_user_mgmt_output("📷 Attempting to access camera for face capture...")
+                
+                def registration_thread():
+                    try:
+                        # Show warning about potential camera conflicts
+                        self.root.after(0, lambda: self.log_user_mgmt_output("🔄 Checking camera availability..."))
+                        
+                        success = self.deepface_auth.register_face(username, first_name="", last_name="", 
+                                                                 email="", role="user", image_path=None, password=password)
+                        if success:
+                            self.root.after(0, lambda: self.log_user_mgmt_output(f"✅ Face registered successfully for {username}"))
+                            self.root.after(0, lambda: self.show_custom_dialog("Success", 
+                                f"Face registered successfully for {username}!\n\nThe user can now authenticate using face recognition.", "info"))
+                        else:
+                            error_msg = f"Face registration failed for {username}"
+                            self.root.after(0, lambda: self.log_user_mgmt_output(f"❌ {error_msg}"))
+                            self.root.after(0, lambda: self.log_user_mgmt_output("💡 Troubleshooting tips:"))
+                            self.root.after(0, lambda: self.log_user_mgmt_output("   - Ensure camera is not being used by detection system"))
+                            self.root.after(0, lambda: self.log_user_mgmt_output("   - Check camera permissions"))
+                            self.root.after(0, lambda: self.log_user_mgmt_output("   - Try using image registration instead"))
+                            
+                            detailed_error = """Face registration failed. Possible causes:
+
+• Camera conflicts with detection system
+• Camera driver issues  
+• Insufficient lighting
+• No face detected in capture
+
+Try:
+1. Stop detection system temporarily
+2. Use 'Register Face (Image)' instead
+3. Ensure good lighting and clear face visibility"""
+                            
+                            self.root.after(0, lambda: self.show_custom_dialog("Registration Failed", detailed_error, "error"))
+                    except Exception as e:
+                        error_msg = f"Error during face registration: {str(e)}"
+                        self.root.after(0, lambda: self.log_user_mgmt_output(f"❌ {error_msg}"))
+                        
+                        # Provide specific guidance based on the error
+                        if "cannot access camera" in str(e).lower() or "msmf" in str(e).lower():
+                            self.root.after(0, lambda: self.log_user_mgmt_output("🔧 Camera access error detected"))
+                            self.root.after(0, lambda: self.log_user_mgmt_output("   This usually means another process is using the camera"))
+                            troubleshoot_msg = """Camera Access Error
+
+The camera is likely being used by:
+• Object detection system
+• Another application
+• System monitoring
+
+Solutions:
+1. Temporarily stop the detection system
+2. Close other camera applications  
+3. Use 'Register Face (Image)' as alternative
+4. Restart the application
+
+Technical details: Microsoft Media Foundation (MSMF) conflict detected."""
+                        else:
+                            troubleshoot_msg = f"Face Registration Error\n\nError: {str(e)}\n\nPlease try again or use image registration instead."
+                        
+                        self.root.after(0, lambda: self.show_custom_dialog("Error", troubleshoot_msg, "error"))
+                
+                threading.Thread(target=registration_thread, daemon=True).start()
             
-            def registration_thread():
-                try:
-                    success = self.deepface_auth.register_face(username)
-                    if success:
-                        self.root.after(0, lambda: self.log_user_mgmt_output(f"✅ Face registered successfully for {username}"))
-                        self.root.after(0, lambda: self.show_custom_dialog("Success", f"Face registered successfully for {username}", "info"))
-                    else:
-                        self.root.after(0, lambda: self.log_user_mgmt_output(f"❌ Face registration failed for {username}"))
-                        self.root.after(0, lambda: self.show_custom_dialog("Error", f"Face registration failed for {username}", "error"))
-                except Exception as e:
-                    self.root.after(0, lambda: self.log_user_mgmt_output(f"❌ Error during face registration: {e}"))
-                    self.root.after(0, lambda: self.show_custom_dialog("Error", f"Face registration error: {e}", "error"))
-            
-            threading.Thread(target=registration_thread, daemon=True).start()
+            self.show_custom_dialog("Password", f"Enter password for {username}:", "info", input_field=True, password=True, callback=on_password_input)
+
+        # Show initial warning about camera usage
+        def proceed_with_registration():
+            self.show_custom_dialog("Username", "Enter username for face registration:", "info", input_field=True, callback=on_username_input)
         
-        self.show_custom_dialog("Username", "Enter username for face registration:", "info", input_field=True, callback=on_username_input)
-    
+        warning_msg = """⚠️ Important Notes
+• Press SPACE to capture your face
+• Press ESC to cancel
+• Ensure good lighting for best results
+"""
+        
+        self.show_custom_dialog("Camera Registration", warning_msg, "yesno", callback=lambda confirmed: proceed_with_registration() if confirmed else None)
+
     def register_face_image(self):
         """Register face from image file."""
         def on_username_input(username):
             if not username:
                 return
             
-            # Show file selection dialog within the GUI
-            self.show_file_selection_dialog("Select face image", [("Image files", "*.jpg *.jpeg *.png *.bmp")], 
-                                           lambda image_path: self._process_image_registration(username, image_path))
+            def on_password_input(password):
+                if not password:
+                    return
+                
+                # Show file selection dialog within the GUI
+                self.show_file_selection_dialog("Select face image", [("Image files", "*.jpg *.jpeg *.png *.bmp")], 
+                                               lambda image_path: self._process_image_registration(username, password, image_path))
+            
+            self.show_custom_dialog("Password", "Enter password for LDAP authentication:", "info", input_field=True, callback=on_password_input, password=True)
         
         self.show_custom_dialog("Username", "Enter username for face registration:", "info", input_field=True, callback=on_username_input)
     
@@ -1265,8 +1475,8 @@ class SecurityGUI:
         
         self.show_custom_dialog("File Path", f"{title}\nEnter full path to image file:", "info", input_field=True, callback=on_path_input)
     
-    def _process_image_registration(self, username, image_path):
-        """Process image registration with given username and path."""
+    def _process_image_registration(self, username, password, image_path):
+        """Process image registration with given username, password and path."""
         if not image_path:
             return
         
@@ -1275,7 +1485,7 @@ class SecurityGUI:
         
         def registration_thread():
             try:
-                success = self.deepface_auth.register_face(username, image_path)
+                success = self.deepface_auth.register_face(username, image_path, password=password)
                 if success:
                     self.root.after(0, lambda: self.log_user_mgmt_output(f"✅ Face registered successfully for {username}"))
                     self.root.after(0, lambda: self.show_custom_dialog("Success", f"Face registered successfully for {username}", "info"))
@@ -1520,10 +1730,100 @@ class SecurityGUI:
         self.logs_output.insert(tk.END, message + "\n")
     
     def minimize_to_system_tray(self):
-        """Minimize GUI to system tray."""
+        """Minimize GUI to system tray and start detection system."""
+        self.is_minimized = True
         self.root.iconify()
-        SecurityUtils.log_security_event("GUI_MINIMIZED", f"User {self.current_user} minimized GUI to system tray")
-        print("GUI minimized to system tray. Detection system continues running.")
+        
+        # Start detection system when GUI is minimized
+        if self.detector_service and not self.detection_running:
+            self.start_detection_system()
+        
+        SecurityUtils.log_security_event("GUI_MINIMIZED", f"User {self.current_user} minimized GUI to system tray - detection started")
+        print("🔽 GUI minimized to system tray. Detection system started.")
+    
+    def restore_from_tray(self):
+        """Restore GUI from system tray and stop detection system."""
+        self.is_minimized = False
+        self.root.deiconify()
+        self.root.lift()
+        self.root.focus_force()
+        
+        # Stop detection system when GUI is restored
+        if self.detector_service and self.detection_running:
+            self.stop_detection_system()
+        
+        SecurityUtils.log_security_event("GUI_RESTORED", f"User {self.current_user} restored GUI from system tray - detection stopped")
+        print("🔼 GUI restored from system tray. Detection system stopped.")
+    
+    def start_detection_system(self):
+        """Start the detection system in a separate thread."""
+        if self.detection_running:
+            print("⚠️ Detection system already running")
+            return
+        
+        def detection_thread():
+            try:
+                self.detection_running = True
+                print("🎥 Starting detection system...")
+                SecurityUtils.log_security_event("DETECTION_STARTED", "Detection system started from GUI")
+                
+                # Start detection with camera source
+                self.detector_service.inference(source=0, view_img=False, save_img=False)
+                
+            except Exception as e:
+                print(f"❌ Detection system error: {e}")
+                SecurityUtils.log_security_event("DETECTION_ERROR", f"Detection system error: {e}")
+            finally:
+                self.detection_running = False
+        
+        # Start detection in daemon thread
+        detection_thread_obj = threading.Thread(target=detection_thread, daemon=True)
+        detection_thread_obj.start()
+    
+    def stop_detection_system(self):
+        """Stop the detection system."""
+        if not self.detection_running:
+            print("⚠️ Detection system not running")
+            return
+        
+        try:
+            print("🛑 Stopping detection system...")
+            SecurityUtils.log_security_event("DETECTION_STOPPED", "Detection system stopped from GUI")
+            
+            # Signal detection to stop
+            if hasattr(self.detector_service, 'stop_detection'):
+                self.detector_service.stop_detection()
+            else:
+                # Fallback: set running flag to False
+                self.detection_running = False
+                
+        except Exception as e:
+            print(f"❌ Error stopping detection: {e}")
+            SecurityUtils.log_security_event("DETECTION_STOP_ERROR", f"Error stopping detection: {e}")
+    
+    def setup_window_events(self):
+        """Setup window event handlers for minimize/restore detection."""
+        # Bind window state events
+        self.root.bind('<Unmap>', self.on_window_minimize)
+        self.root.bind('<Map>', self.on_window_restore)
+        
+        # Add global hotkey for restoring window (Ctrl+Shift+R)
+        self.root.bind_all('<Control-Shift-R>', lambda e: self.restore_from_tray())
+        
+        # Override the minimize button behavior
+        self.root.protocol("WM_DELETE_WINDOW", lambda: None)  # Keep security requirement
+    
+    def on_window_minimize(self, event):
+        """Handle window minimize event."""
+        if event.widget == self.root:
+            if not self.is_minimized:  # Avoid duplicate calls
+                self.minimize_to_system_tray()
+    
+    def on_window_restore(self, event):
+        """Handle window restore event."""
+        if event.widget == self.root:
+            if self.is_minimized:  # Only if actually minimized
+                self.restore_from_tray()
     
     def logout(self):
         """Logout and return to authentication screen."""

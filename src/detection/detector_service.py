@@ -29,6 +29,7 @@ class DetectorService:
         self.consecutive_misses = 0
         self.gui_authenticated = False  # Track if GUI authentication was completed
         self.last_recording_detection_time = 0
+        self.is_running = False  # Flag to control detection loop
         
         # Initialize components
         self.detector = YOLODetector()
@@ -296,7 +297,16 @@ class DetectorService:
         # Load model
         self.detector.load_model(weights)
         
-        while cap.isOpened():
+        # Set running flag
+        self.is_running = True
+        print("🎥 Detection system started")
+        
+        while cap.isOpened() and self.is_running:
+            # Check if we should stop
+            if not self.is_running:
+                print("🛑 Detection system stop requested")
+                break
+                
             success, frame = cap.read()
             if not success:
                 # For webcam, if read fails, check camera availability
@@ -401,9 +411,17 @@ class DetectorService:
                 break
             time.sleep(0.1) 
 
+        # Cleanup
+        self.is_running = False
         cap.release()
         cv2.destroyAllWindows()
         self.system_monitor.stop_security_monitoring()
+        print("🛑 Detection system stopped")
+
+    def stop_detection(self):
+        """Stop the detection system."""
+        print("🛑 Stop detection requested")
+        self.is_running = False
 
     def retry_camera_connection(self):
         """Attempt to reconnect to camera."""
