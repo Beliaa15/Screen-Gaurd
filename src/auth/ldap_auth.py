@@ -3,7 +3,7 @@ LDAP Authentication Module
 """
 
 from typing import Tuple, Dict, Any, Optional
-from ldap3 import Server, Connection, ALL, NTLM, MODIFY_ADD, MODIFY_DELETE
+from ldap3 import Server, Connection, ALL, NTLM, MODIFY_ADD, MODIFY_DELETE, MODIFY_REPLACE
 from ldap3.core.exceptions import LDAPException
 import secrets
 import string
@@ -25,6 +25,16 @@ class LDAPAuthenticator(BaseAuthenticator):
         self.admin_group = config.LDAP_ADMIN_GROUP
         self.operator_group = config.LDAP_OPERATOR_GROUP
         self.user_group = config.LDAP_USER_GROUP
+        
+        # Organizational Units for different user types
+        self.admin_ou = getattr(config, 'LDAP_ADMIN_OU', f"CN=Users,DC={self.base_dn.replace('.', ',DC=')}")
+        self.operator_ou = getattr(config, 'LDAP_OPERATOR_OU', f"CN=Users,DC={self.base_dn.replace('.', ',DC=')}")
+        self.user_ou = getattr(config, 'LDAP_USER_OU', f"CN=Users,DC={self.base_dn.replace('.', ',DC=')}")
+        
+        # Admin credentials for user creation operations
+        self.admin_user = getattr(config, 'LDAP_ADMIN_USER', 'administrator')
+        self.admin_password = getattr(config, 'LDAP_ADMIN_PASSWORD', '')
+        self.admin_dn = getattr(config, 'LDAP_ADMIN_DN', f"CN=administrator,CN=Users,DC={self.base_dn.replace('.', ',DC=')}")
         
     def is_available(self) -> bool:
         """Check if LDAP authentication is available."""
@@ -255,14 +265,43 @@ class LDAPAuthenticator(BaseAuthenticator):
                 return False, f"User '{username}' already exists"
             
             server = Server(self.server_uri, get_info=ALL)
-            # Use administrative credentials to create user
-            # This would need to be configured with proper admin credentials
-            conn = Connection(server)
             
-            # For this example, we'll use anonymous bind or would need admin credentials
-            # In production, you'd need proper LDAP admin credentials
-            if not conn.bind():
-                return False, "Failed to connect to LDAP server with admin privileges"
+            # Use administrative credentials to create user
+            if not self.admin_password:
+                return False, "LDAP admin credentials not configured. Please set LDAP_ADMIN_PASSWORD in config."
+            
+            # Try different admin authentication methods
+            admin_conn = None
+            auth_methods = [
+                # Method 1: Use admin DN directly
+                (self.admin_dn, self.admin_password, 'SIMPLE'),
+                # Method 2: Use domain\username format
+                (f"{self.base_dn.split('.')[0]}\\{self.admin_user}", self.admin_password, 'SIMPLE'),
+                # Method 3: Use UPN format
+                (f"{self.admin_user}@{self.base_dn}", self.admin_password, 'SIMPLE'),
+                # Method 4: Just username
+                (self.admin_user, self.admin_password, 'SIMPLE')
+            ]
+            
+            for admin_user_format, admin_pass, auth_type in auth_methods:
+                try:
+                    admin_conn = Connection(
+                        server, 
+                        user=admin_user_format, 
+                        password=admin_pass,
+                        authentication=auth_type,
+                        auto_bind=True
+                    )
+                    
+                    if admin_conn and admin_conn.bound:
+                        break
+                        
+                except Exception as e:
+                    admin_conn = None
+                    continue
+            
+            if not admin_conn or not admin_conn.bound:
+                return False, f"Failed to authenticate with LDAP admin credentials. Check LDAP_ADMIN_USER and LDAP_ADMIN_PASSWORD in config."
             
             # Prepare search base - convert domain to DN format
             if '.' in self.base_dn:
@@ -271,8 +310,23 @@ class LDAPAuthenticator(BaseAuthenticator):
             else:
                 search_base = f"DC={self.base_dn}"
             
-            # Create user DN
-            user_dn = f"CN={first_name} {last_name},CN=Users,{search_base}"
+            # Create user DN - use full name if available, otherwise username
+            if first_name and last_name:
+                cn_name = f"{first_name} {last_name}"
+            elif first_name:
+                cn_name = first_name
+            else:
+                cn_name = username
+                
+            # Get the appropriate OU based on user role
+            user_ou = self._get_user_ou(role, search_base)
+            user_dn = f"CN={cn_name},{user_ou}"
+            
+            # Ensure the OU exists before creating user
+            if not self._ensure_ou_exists(user_ou, admin_conn):
+                # If OU creation fails, fall back to default Users container
+                user_dn = f"CN={cn_name},CN=Users,{search_base}"
+                print(f"Warning: Could not create/access OU {user_ou}, using default Users container")
             
             # User attributes
             full_name = f"{first_name} {last_name}".strip() or username
@@ -286,34 +340,58 @@ class LDAPAuthenticator(BaseAuthenticator):
                 'displayName': display_name,
                 'givenName': first_name,
                 'sn': last_name or username,
-                'userAccountControl': 512,  # Normal account, enabled
+                'userAccountControl': 546,  # Disabled account initially (will enable after setting password)
             }
             
             if email:
                 attributes['mail'] = email
             
-            # Add user to LDAP
-            success = conn.add(user_dn, attributes=attributes)
+            # Add user to LDAP (disabled initially)
+            success = admin_conn.add(user_dn, attributes=attributes)
             
             if success:
-                # Set password
-                conn.extend.microsoft.modify_password(user_dn, password)
-                
-                # Add user to appropriate group based on role
-                group_dn = self._get_group_dn(role, search_base)
-                if group_dn:
-                    conn.modify(group_dn, {'member': [(MODIFY_ADD, [user_dn])]})
-                
-                conn.unbind()
-                SecurityUtils.log_security_event("LDAP_USER_CREATED", 
-                                               f"Created LDAP user: {username}, role: {role}")
-                return True, f"User '{username}' created successfully"
+                try:
+                    # Set password first
+                    admin_conn.extend.microsoft.modify_password(user_dn, password)
+
+                    # Enable the account after password is set
+                    admin_conn.modify(user_dn, {'userAccountControl': [(MODIFY_REPLACE, [512])]})
+                    
+                    # Add user to appropriate group based on role
+                    group_dn = self._get_group_dn(role, search_base)
+                    if group_dn:
+                        admin_conn.modify(group_dn, {'member': [(MODIFY_ADD, [user_dn])]})
+                    
+                    admin_conn.unbind()
+                    SecurityUtils.log_security_event("LDAP_USER_CREATED", 
+                                                   f"Created LDAP user: {username}, role: {role}")
+                    return True, f"User '{username}' created successfully in OU=SecuritySystem with role '{role}'"
+                    
+                except Exception as password_error:
+                    # If password setting fails, try to delete the user to clean up
+                    try:
+                        admin_conn.delete(user_dn)
+                    except:
+                        pass
+                    admin_conn.unbind()
+                    return False, f"Failed to set password for user: {str(password_error)}"
             else:
-                conn.unbind()
-                return False, f"Failed to create user: {conn.result}"
+                admin_conn.unbind()
+                error_info = {
+                    'result_code': admin_conn.result.get('result', 'Unknown'),
+                    'description': admin_conn.result.get('description', 'Unknown'),
+                    'message': admin_conn.result.get('message', 'No message'),
+                    'dn': admin_conn.result.get('dn', 'No DN')
+                }
+                return False, f"Failed to create user: {admin_conn.result}. Error details: {error_info}"
             
         except LDAPException as e:
-            return False, f"LDAP error creating user: {str(e)}"
+            error_details = {
+                'error': str(e),
+                'server_info': getattr(e, 'result', 'No result info'),
+                'description': getattr(e, 'description', 'No description')
+            }
+            return False, f"LDAP error creating user: {error_details}"
         except Exception as e:
             return False, f"Error creating user: {str(e)}"
 
@@ -385,6 +463,61 @@ class LDAPAuthenticator(BaseAuthenticator):
         if group_name:
             return f"CN={group_name},CN=Groups,{search_base}"
         return None
+
+    def _get_user_ou(self, role: str, search_base: str) -> str:
+        """Get the appropriate OU for a user based on their role."""
+        ou_mapping = {
+            'admin': self.admin_ou,
+            'operator': self.operator_ou,
+            'user': self.user_ou
+        }
+        
+        # Return the OU for the role, or default to user OU
+        return ou_mapping.get(role, self.user_ou)
+
+    def _ensure_ou_exists(self, ou_dn: str, admin_conn: Connection) -> bool:
+        """Ensure the OU exists, create it if it doesn't."""
+        try:
+            # Check if OU exists
+            admin_conn.search(
+                search_base=ou_dn,
+                search_filter="(objectClass=organizationalUnit)",
+                search_scope='BASE',
+                attributes=['cn']
+            )
+            
+            # If we found it, it exists
+            if admin_conn.entries:
+                return True
+            
+            # OU doesn't exist, try to create it
+            # Parse the OU DN to get components
+            dn_parts = ou_dn.split(',')
+            if not dn_parts:
+                return False
+                
+            # Get the OU name from the first component
+            ou_part = dn_parts[0]
+            if not ou_part.startswith('OU='):
+                return False
+                
+            ou_name = ou_part[3:]  # Remove 'OU=' prefix
+            parent_dn = ','.join(dn_parts[1:])  # Everything after the first OU
+            
+            # Create the OU
+            attributes = {
+                'objectClass': ['top', 'organizationalUnit'],
+                'ou': ou_name,
+                'name': ou_name,
+                'description': f'Security System OU for {ou_name}'
+            }
+            
+            success = admin_conn.add(ou_dn, attributes=attributes)
+            return success
+            
+        except Exception as e:
+            print(f"Error checking/creating OU {ou_dn}: {e}")
+            return False
 
     def generate_temporary_password(self, length: int = 12) -> str:
         """Generate a secure temporary password for new users."""

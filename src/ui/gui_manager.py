@@ -3,18 +3,26 @@ GUI Manager for Physical Security System
 Provides full-screen startup screen, login interface, and dashboard.
 """
 
-import mttkinter.mtTkinter as tk
+import tkinter as tk
+from tkinter import ttk, filedialog
 import threading
 import time
+import os
+import string
+import secrets
 from datetime import datetime
 import subprocess
 import sys
 from pathlib import Path
+from typing import Dict, Optional, Tuple
 
 from ..core.config import Config
 from ..utils.security_utils import SecurityUtils
 from ..auth.ldap_auth import LDAPAuthenticator
 from ..auth.deepface_auth import DeepFaceAuthenticator
+from ..auth.biometric_auth import BiometricAuthenticator
+import secrets
+import string
 
 
 class SecurityGUI:
@@ -25,6 +33,8 @@ class SecurityGUI:
         self.root = tk.Tk()
         self.auth_manager = auth_manager
         self.deepface_auth = DeepFaceAuthenticator()
+        self.biometric_auth = BiometricAuthenticator()  # Add biometric auth
+        self.ldap_auth = LDAPAuthenticator(Config())  # Initialize with config
         self.detector_service = detector_service  # Reference to detection service
         self.is_authenticated = False
         self.current_user = None
@@ -32,6 +42,16 @@ class SecurityGUI:
         self.current_screen = None
         self.is_minimized = False
         self.detection_running = False
+        
+        # User management form variables
+        self.username_var = tk.StringVar()
+        self.first_name_var = tk.StringVar()
+        self.last_name_var = tk.StringVar()
+        self.email_var = tk.StringVar()
+        self.role_var = tk.StringVar(value="user")
+        self.selected_image_path = ""
+        self.ldap_user_var = tk.StringVar()
+        self.ldap_pass_var = tk.StringVar()
         
         # Configure main window
         self.setup_window()
@@ -699,7 +719,7 @@ class SecurityGUI:
         cancel_btn.pack(pady=30)
         
         # Start authentication process
-        self.root.after(2000, self.attempt_deepface_login)
+        self.root.after(0, self.attempt_deepface_login)
     
     def attempt_deepface_login(self):
         """Attempt DeepFace authentication."""
@@ -1006,7 +1026,7 @@ class SecurityGUI:
         if self.current_role and self.current_role.lower() in ['admin', 'administrator']:
             admin_frame = tk.LabelFrame(controls_frame, text="Administrator Controls", 
                                        font=("Helvetica", 14, "bold"), fg="gold", bg="darkblue")
-            admin_frame.pack(pady=10, padx=20, fill='x')
+            admin_frame.pack(pady=10, padx=20)
             
             # User Management button
             user_mgmt_btn = tk.Button(
@@ -1084,7 +1104,7 @@ class SecurityGUI:
         info_label.pack(side='left', padx=20)
     
     def show_user_management(self):
-        """Show the user management interface within the GUI."""
+        """Show the comprehensive user management interface within the GUI."""
         self.clear_screen()
         self.current_screen = "user_management"
         
@@ -1119,142 +1139,653 @@ class SecurityGUI:
         )
         back_btn.pack(side='right', padx=20, pady=15)
         
-        # Content area
-        content_frame = tk.Frame(main_frame, bg='darkblue')
-        content_frame.pack(expand=True, fill='both', padx=20, pady=20)
+        # Main content container
+        content_container = tk.Frame(main_frame, bg='darkblue')
+        content_container.pack(expand=True, fill='both', padx=10, pady=10)
         
-        # Face Registration Section
-        face_frame = tk.LabelFrame(content_frame, text="Face Registration (DeepFace)", 
+        # Left panel for user input and actions
+        left_panel = tk.Frame(content_container, bg='darkblue', width=500)
+        left_panel.pack(side='left', fill='both', expand=False, padx=(0,10))
+        left_panel.pack_propagate(False)
+        
+        # Right panel for output and user list
+        right_panel = tk.Frame(content_container, bg='darkblue')
+        right_panel.pack(side='right', fill='both', expand=True)
+        
+        self.setup_user_mgmt_left_panel(left_panel)
+        self.setup_user_mgmt_right_panel(right_panel)
+    
+    def setup_user_mgmt_left_panel(self, parent):
+        """Setup the left panel with user input and action buttons."""
+        
+        # User Information Section
+        info_frame = tk.LabelFrame(parent, text="User Information", 
                                   font=("Helvetica", 12, "bold"), fg="gold", bg="darkblue")
-        face_frame.pack(fill='x', pady=10)
+        info_frame.pack(fill='x', pady=5)
         
-        tk.Button(
-            face_frame,
-            text="📷 Register Face (Camera)",
-            command=self.register_face_camera,
-            font=("Helvetica", 11, "bold"),
-            bg="darkgreen",
-            fg="white",
-            width=25,
-            height=2
-        ).pack(pady=10, padx=10, side='left')
+        # Username
+        tk.Label(info_frame, text="Username:", fg="white", bg="darkblue", font=("Helvetica", 10)).grid(row=0, column=0, sticky='w', padx=5, pady=3)
+        username_entry = tk.Entry(info_frame, textvariable=self.username_var, width=25, font=("Helvetica", 10))
+        username_entry.grid(row=0, column=1, padx=5, pady=3)
         
-        tk.Button(
-            face_frame,
-            text="🖼️ Register Face (Image)",
-            command=self.register_face_image,
-            font=("Helvetica", 11, "bold"),
-            bg="darkblue",
-            fg="white",
-            width=25,
-            height=2
-        ).pack(pady=10, padx=10, side='left')
+        # First Name
+        tk.Label(info_frame, text="First Name:", fg="white", bg="darkblue", font=("Helvetica", 10)).grid(row=1, column=0, sticky='w', padx=5, pady=3)
+        tk.Entry(info_frame, textvariable=self.first_name_var, width=25, font=("Helvetica", 10)).grid(row=1, column=1, padx=5, pady=3)
         
-        # LDAP User Creation Section
-        ldap_frame = tk.LabelFrame(content_frame, text="LDAP User + Face Registration", 
-                                  font=("Helvetica", 12, "bold"), fg="cyan", bg="darkblue")
-        ldap_frame.pack(fill='x', pady=10)
+        # Last Name
+        tk.Label(info_frame, text="Last Name:", fg="white", bg="darkblue", font=("Helvetica", 10)).grid(row=2, column=0, sticky='w', padx=5, pady=3)
+        tk.Entry(info_frame, textvariable=self.last_name_var, width=25, font=("Helvetica", 10)).grid(row=2, column=1, padx=5, pady=3)
         
-        tk.Button(
-            ldap_frame,
-            text="🆕 Create LDAP User (Camera)",
-            command=self.create_ldap_user_camera,
-            font=("Helvetica", 11, "bold"),
-            bg="darkslategray",
-            fg="white",
-            width=25,
-            height=2
-        ).pack(pady=10, padx=10, side='left')
+        # Email
+        tk.Label(info_frame, text="Email:", fg="white", bg="darkblue", font=("Helvetica", 10)).grid(row=3, column=0, sticky='w', padx=5, pady=3)
+        tk.Entry(info_frame, textvariable=self.email_var, width=25, font=("Helvetica", 10)).grid(row=3, column=1, padx=5, pady=3)
         
-        tk.Button(
-            ldap_frame,
-            text="🆕 Create LDAP User (Image)",
-            command=self.create_ldap_user_image,
-            font=("Helvetica", 11, "bold"),
-            bg="steelblue",
-            fg="white",
-            width=25,
-            height=2
-        ).pack(pady=10, padx=10, side='left')
-
-        # User Management Section
-        user_frame = tk.LabelFrame(content_frame, text="User Management", 
+        # Role
+        tk.Label(info_frame, text="Role:", fg="white", bg="darkblue", font=("Helvetica", 10)).grid(row=4, column=0, sticky='w', padx=5, pady=3)
+        role_frame = tk.Frame(info_frame, bg="darkblue")
+        role_frame.grid(row=4, column=1, sticky='w', padx=5, pady=3)
+        
+        roles = [("User", "user"), ("Operator", "operator"), ("Admin", "admin")]
+        for i, (text, value) in enumerate(roles):
+            tk.Radiobutton(role_frame, text=text, variable=self.role_var, value=value,
+                          fg="white", bg="darkblue", selectcolor="navy", font=("Helvetica", 9)).pack(side='left', padx=5)
+        
+        # Add informational text about OU placement
+        ou_info_frame = tk.Frame(info_frame, bg="darkblue")
+        ou_info_frame.grid(row=4, column=2, sticky='w', padx=5, pady=3)
+        tk.Label(ou_info_frame, text="Users will be created in SecuritySystem OU", 
+                fg="lightgray", bg="darkblue", font=("Helvetica", 8)).pack()
+        
+        # Clear button
+        tk.Button(info_frame, text="Clear Form", command=self.clear_user_form,
+                 bg='gray', fg='white', font=("Helvetica", 9)).grid(row=5, column=1, sticky='e', padx=5, pady=5)
+        
+        # Image Selection Section
+        image_frame = tk.LabelFrame(parent, text="Image Selection (Optional)", 
+                                   font=("Helvetica", 12, "bold"), fg="cyan", bg="darkblue")
+        image_frame.pack(fill='x', pady=5)
+        
+        self.image_label = tk.Label(image_frame, text="No image selected", 
+                                   fg="gray", bg="darkblue", font=("Helvetica", 9))
+        self.image_label.pack(pady=5)
+        
+        tk.Button(image_frame, text="Select Image File", command=self.select_image_file,
+                 bg='steelblue', fg='white', font=("Helvetica", 10)).pack(pady=5)
+        
+        # User Registration Actions
+        reg_frame = tk.LabelFrame(parent, text="User Registration Actions", 
+                                 font=("Helvetica", 12, "bold"), fg="lightgreen", bg="darkblue")
+        reg_frame.pack(fill='x', pady=5)
+        
+        tk.Button(reg_frame, text="Register User + Face (Camera)", 
+                 command=self.register_user_camera_unified,
+                 bg='darkgreen', fg='white', font=("Helvetica", 10), width=30).pack(pady=3)
+        
+        tk.Button(reg_frame, text="Register User + Face (Image)", 
+                 command=self.register_user_image_unified,
+                 bg='darkblue', fg='white', font=("Helvetica", 10), width=30).pack(pady=3)
+        
+        tk.Button(reg_frame, text="Create LDAP User Only", 
+                 command=self.create_ldap_user_only_unified,
+                 bg='purple', fg='white', font=("Helvetica", 10), width=30).pack(pady=3)
+        
+        # Authentication Testing
+        test_frame = tk.LabelFrame(parent, text="Authentication Testing", 
+                                  font=("Helvetica", 12, "bold"), fg="yellow", bg="darkblue")
+        test_frame.pack(fill='x', pady=5)
+        
+        test_buttons_frame = tk.Frame(test_frame, bg="darkblue")
+        test_buttons_frame.pack(pady=5)
+        
+        tk.Button(test_buttons_frame, text="Test DeepFace", 
+                 command=self.test_deepface_auth_unified,
+                 bg='darkviolet', fg='white', font=("Helvetica", 9), width=15).pack(side='left', padx=2)
+        
+        tk.Button(test_buttons_frame, text="Test Fingerprint", 
+                 command=self.test_fingerprint_auth_unified,
+                 bg='red', fg='white', font=("Helvetica", 9), width=15).pack(side='left', padx=2)
+        
+        # LDAP Authentication Testing (requires username/password)
+        ldap_test_frame = tk.Frame(test_frame, bg="darkblue")
+        ldap_test_frame.pack(pady=3)
+        
+        tk.Label(ldap_test_frame, text="LDAP Test - Username:", fg="white", bg="darkblue", font=("Helvetica", 9)).pack(side='left')
+        tk.Entry(ldap_test_frame, textvariable=self.ldap_user_var, width=15, font=("Helvetica", 9)).pack(side='left', padx=3)
+        
+        tk.Label(ldap_test_frame, text="Password:", fg="white", bg="darkblue", font=("Helvetica", 9)).pack(side='left', padx=(10,0))
+        tk.Entry(ldap_test_frame, textvariable=self.ldap_pass_var, width=15, show='*', font=("Helvetica", 9)).pack(side='left', padx=3)
+        
+        tk.Button(ldap_test_frame, text="Test LDAP", 
+                 command=self.test_ldap_auth_unified,
+                 bg='orange', fg='white', font=("Helvetica", 9)).pack(side='left', padx=5)
+        
+        # User Management Actions
+        mgmt_frame = tk.LabelFrame(parent, text="User Management", 
                                   font=("Helvetica", 12, "bold"), fg="lightblue", bg="darkblue")
-        user_frame.pack(fill='x', pady=10)
+        mgmt_frame.pack(fill='x', pady=5)
         
-        tk.Button(
-            user_frame,
-            text="📋 List Users",
-            command=self.list_registered_users,
-            font=("Helvetica", 11, "bold"),
-            bg="purple",
-            fg="white",
-            width=20,
-            height=2
-        ).pack(pady=10, padx=10, side='left')
+        mgmt_buttons_frame = tk.Frame(mgmt_frame, bg="darkblue")
+        mgmt_buttons_frame.pack(pady=5)
         
-        tk.Button(
-            user_frame,
-            text="🗑️ Delete User",
-            command=self.delete_user_face,
-            font=("Helvetica", 11, "bold"),
-            bg="darkred",
-            fg="white",
-            width=20,
-            height=2
-        ).pack(pady=10, padx=10, side='left')
+        tk.Button(mgmt_buttons_frame, text="Refresh User List", 
+                 command=self.refresh_user_list_unified,
+                 bg='darkgreen', fg='white', font=("Helvetica", 9), width=15).pack(side='left', padx=2)
         
-        # Authentication Testing Section
-        test_frame = tk.LabelFrame(content_frame, text="Authentication Testing", 
-                                  font=("Helvetica", 12, "bold"), fg="orange", bg="darkblue")
-        test_frame.pack(fill='x', pady=10)
+        tk.Button(mgmt_buttons_frame, text="Delete Selected User", 
+                 command=self.delete_selected_user_unified,
+                 bg='darkred', fg='white', font=("Helvetica", 9), width=15).pack(side='left', padx=2)
         
-        tk.Button(
-            test_frame,
-            text="🧠 Test DeepFace",
-            command=self.test_deepface_auth,
-            font=("Helvetica", 11, "bold"),
-            bg="darkviolet",
-            fg="white",
-            width=20,
-            height=2
-        ).pack(pady=10, padx=10, side='left')
+        # System Information
+        sys_frame = tk.LabelFrame(parent, text="System Information", 
+                                 font=("Helvetica", 12, "bold"), fg="orange", bg="darkblue")
+        sys_frame.pack(fill='x', pady=5)
         
-        tk.Button(
-            test_frame,
-            text="🔐 Test LDAP",
-            command=self.test_ldap_auth,
-            font=("Helvetica", 11, "bold"),
-            bg="orange",
-            fg="white",
-            width=20,
-            height=2
-        ).pack(pady=10, padx=10, side='left')
+        sys_buttons_frame = tk.Frame(sys_frame, bg="darkblue")
+        sys_buttons_frame.pack(pady=5)
         
-        # Output area
-        output_frame = tk.LabelFrame(content_frame, text="Output", 
+        tk.Button(sys_buttons_frame, text="System Status", 
+                 command=self.show_system_status_unified,
+                 bg='brown', fg='white', font=("Helvetica", 9), width=15).pack(side='left', padx=2)
+        
+        tk.Button(sys_buttons_frame, text="View Security Logs", 
+                 command=self.view_security_logs_unified,
+                 bg='navy', fg='white', font=("Helvetica", 9), width=15).pack(side='left', padx=2)
+    
+    def setup_user_mgmt_right_panel(self, parent):
+        """Setup the right panel with output and user list."""
+        
+        # User List Section
+        users_frame = tk.LabelFrame(parent, text="Registered Users", 
+                                   font=("Helvetica", 12, "bold"), fg="lightgreen", bg="darkblue")
+        users_frame.pack(fill='both', expand=True, pady=(0,5))
+        
+        # User list with scrollbar
+        list_frame = tk.Frame(users_frame, bg="darkblue")
+        list_frame.pack(fill='both', expand=True, padx=5, pady=5)
+        
+        # Create Treeview for user list
+        columns = ('System', 'Username', 'Name', 'Role', 'Email', 'Created')
+        self.user_tree = ttk.Treeview(list_frame, columns=columns, show='headings', height=10)
+        
+        # Configure columns
+        self.user_tree.heading('System', text='System')
+        self.user_tree.heading('Username', text='Username')
+        self.user_tree.heading('Name', text='Full Name')
+        self.user_tree.heading('Role', text='Role')
+        self.user_tree.heading('Email', text='Email')
+        self.user_tree.heading('Created', text='Created')
+        
+        self.user_tree.column('System', width=80)
+        self.user_tree.column('Username', width=100)
+        self.user_tree.column('Name', width=150)
+        self.user_tree.column('Role', width=80)
+        self.user_tree.column('Email', width=150)
+        self.user_tree.column('Created', width=120)
+        
+        # Scrollbars for user list
+        v_scrollbar = ttk.Scrollbar(list_frame, orient='vertical', command=self.user_tree.yview)
+        h_scrollbar = ttk.Scrollbar(list_frame, orient='horizontal', command=self.user_tree.xview)
+        self.user_tree.configure(yscrollcommand=v_scrollbar.set, xscrollcommand=h_scrollbar.set)
+        
+        # Use grid for better scrollbar placement
+        self.user_tree.grid(row=0, column=0, sticky='nsew')
+        v_scrollbar.grid(row=0, column=1, sticky='ns')
+        h_scrollbar.grid(row=1, column=0, sticky='ew')
+        
+        # Configure grid weights
+        list_frame.grid_rowconfigure(0, weight=1)
+        list_frame.grid_columnconfigure(0, weight=1)
+        
+        # Output Section
+        output_frame = tk.LabelFrame(parent, text="System Output", 
                                     font=("Helvetica", 12, "bold"), fg="white", bg="darkblue")
-        output_frame.pack(fill='both', expand=True, pady=10)
+        output_frame.pack(fill='both', expand=True, pady=(5,0))
         
-        # Create text widget with scrollbar
-        text_frame = tk.Frame(output_frame, bg='darkblue')
-        text_frame.pack(fill='both', expand=True, padx=10, pady=10)
+        # Output text with scrollbar
+        output_container = tk.Frame(output_frame, bg="darkblue")
+        output_container.pack(fill='both', expand=True, padx=5, pady=5)
         
-        self.user_mgmt_output = tk.Text(
-            text_frame,
-            height=15,
-            font=("Courier", 10),
-            bg='black',
-            fg='lightgreen',
-            wrap=tk.WORD
-        )
+        self.user_mgmt_output = tk.Text(output_container, height=12, font=("Courier", 9), bg='black', fg='white')
+        output_scrollbar = ttk.Scrollbar(output_container, command=self.user_mgmt_output.yview)
+        self.user_mgmt_output.configure(yscrollcommand=output_scrollbar.set)
+        
         self.user_mgmt_output.pack(side='left', fill='both', expand=True)
+        output_scrollbar.pack(side='right', fill='y')
         
-        scrollbar = tk.Scrollbar(text_frame, command=self.user_mgmt_output.yview)
-        scrollbar.pack(side='right', fill='y')
-        self.user_mgmt_output.config(yscrollcommand=scrollbar.set)
+        # Load initial data
+        self.refresh_user_list_unified()
+        self.log_user_mgmt_message("User Management System initialized")
+    
+    # User Management Helper Methods
+    def validate_user_info(self):
+        """Validate that required user information is provided."""
+        username = self.username_var.get().strip()
+        if not username:
+            self.log_user_mgmt_message("ERROR: Username is required", "error")
+            return False
+        return True
+    
+    def get_user_info(self):
+        """Get user information from form fields."""
+        return {
+            'username': self.username_var.get().strip(),
+            'first_name': self.first_name_var.get().strip(),
+            'last_name': self.last_name_var.get().strip(),
+            'email': self.email_var.get().strip(),
+            'role': self.role_var.get()
+        }
+    
+    def clear_user_form(self):
+        """Clear all form fields."""
+        self.username_var.set("")
+        self.first_name_var.set("")
+        self.last_name_var.set("")
+        self.email_var.set("")
+        self.role_var.set("user")
+        self.selected_image_path = ""
+        if hasattr(self, 'image_label'):
+            self.image_label.config(text="No image selected", fg='gray')
+        self.log_user_mgmt_message("Form cleared")
+    
+    def select_image_file(self):
+        """Select an image file for face registration."""
+        file_path = filedialog.askopenfilename(
+            title="Select Face Image",
+            filetypes=[
+                ("Image files", "*.png *.jpg *.jpeg *.gif *.bmp"),
+                ("All files", "*.*")
+            ]
+        )
+        if file_path:
+            self.selected_image_path = file_path
+            filename = os.path.basename(file_path)
+            if hasattr(self, 'image_label'):
+                self.image_label.config(text=f"Selected: {filename}", fg='lightgreen')
+            self.log_user_mgmt_message(f"Image selected: {filename}")
+    
+    def log_user_mgmt_message(self, message, level="info"):
+        """Log message to the user management output with timestamp and color coding."""
+        if not hasattr(self, 'user_mgmt_output'):
+            return
+            
+        timestamp = datetime.now().strftime("%H:%M:%S")
         
-        self.log_user_mgmt_output("User Management interface loaded. Select an operation above.")
+        # Insert message with timestamp
+        self.user_mgmt_output.insert(tk.END, f"[{timestamp}] {message}\n")
+        
+        # Color coding based on level
+        if level == "error":
+            # Make the last line red
+            start_line = self.user_mgmt_output.index(tk.END).split('.')[0]
+            line_num = int(start_line) - 1
+            self.user_mgmt_output.tag_add("error", f"{line_num}.0", f"{line_num}.end")
+            self.user_mgmt_output.tag_config("error", foreground="red")
+        elif level == "success":
+            # Make the last line green
+            start_line = self.user_mgmt_output.index(tk.END).split('.')[0]
+            line_num = int(start_line) - 1
+            self.user_mgmt_output.tag_add("success", f"{line_num}.0", f"{line_num}.end")
+            self.user_mgmt_output.tag_config("success", foreground="lightgreen")
+        elif level == "warning":
+            # Make the last line orange
+            start_line = self.user_mgmt_output.index(tk.END).split('.')[0]
+            line_num = int(start_line) - 1  
+            self.user_mgmt_output.tag_add("warning", f"{line_num}.0", f"{line_num}.end")
+            self.user_mgmt_output.tag_config("warning", foreground="orange")
+        
+        # Auto-scroll to bottom
+        self.user_mgmt_output.see(tk.END)
+        self.root.update()
+    
+    # User Registration Methods
+    def register_user_camera_unified(self):
+        """Register a user and their face using camera."""
+        if not self.validate_user_info():
+            return
+            
+        user_info = self.get_user_info()
+        self.log_user_mgmt_message(f"Starting user registration for: {user_info['username']}")
+        
+        try:
+            # Use the unified registration method from DeepFace with camera
+            success, message = self.deepface_auth.create_ldap_user_with_face(
+                username=user_info['username'],
+                first_name=user_info['first_name'],
+                last_name=user_info['last_name'],
+                email=user_info['email'],
+                role=user_info['role']
+            )
+            
+            if success:
+                self.log_user_mgmt_message(f"SUCCESS: {message}", "success")
+                self.refresh_user_list_unified()
+                self.clear_user_form()
+            else:
+                self.log_user_mgmt_message(f"ERROR: {message}", "error")
+                
+        except Exception as e:
+            self.log_user_mgmt_message(f"Registration error: {str(e)}", "error")
+    
+    def register_user_image_unified(self):
+        """Register a user and their face using selected image."""
+        if not self.validate_user_info():
+            return
+            
+        if not self.selected_image_path:
+            self.log_user_mgmt_message("ERROR: Please select an image file first", "error")
+            return
+        
+        user_info = self.get_user_info()
+        self.log_user_mgmt_message(f"Starting user registration for: {user_info['username']} with image")
+        
+        try:
+            # Use the unified registration method from DeepFace with image
+            success, message = self.deepface_auth.create_ldap_user_with_face(
+                username=user_info['username'],
+                first_name=user_info['first_name'],
+                last_name=user_info['last_name'],
+                email=user_info['email'],
+                role=user_info['role'],
+                image_path=self.selected_image_path
+            )
+            
+            if success:
+                self.log_user_mgmt_message(f"SUCCESS: {message}", "success")
+                self.refresh_user_list_unified()
+                self.clear_user_form()
+            else:
+                self.log_user_mgmt_message(f"ERROR: {message}", "error")
+                
+        except Exception as e:
+            self.log_user_mgmt_message(f"Registration error: {str(e)}", "error")
+    
+    def create_ldap_user_only_unified(self):
+        """Create LDAP user without face registration."""
+        if not self.validate_user_info():
+            return
+            
+        user_info = self.get_user_info()
+        self.log_user_mgmt_message(f"Creating LDAP user: {user_info['username']}")
+        
+        try:
+            # Generate a secure password that meets typical domain requirements
+            password_length = 14  # Increased length
+            # Include all required character types for domain policy
+            uppercase = string.ascii_uppercase
+            lowercase = string.ascii_lowercase
+            digits = string.digits
+            special = "!@#$%^&*()_+-=[]{}|;:,.<>?"
+            
+            # Ensure password contains at least one of each type
+            temp_password = (
+                secrets.choice(uppercase) +
+                secrets.choice(lowercase) + 
+                secrets.choice(digits) +
+                secrets.choice(special) +
+                ''.join(secrets.choice(uppercase + lowercase + digits + special) 
+                       for _ in range(password_length - 4))
+            )
+            
+            # Shuffle the password to randomize character positions
+            password_list = list(temp_password)
+            secrets.SystemRandom().shuffle(password_list)
+            temp_password = ''.join(password_list)
+
+            success, message = self.ldap_auth.create_user(
+                username=user_info['username'],
+                password=temp_password,
+                first_name=user_info['first_name'],
+                last_name=user_info['last_name'],
+                email=user_info['email'],
+                role=user_info['role']
+            )
+            
+            if success:
+                self.log_user_mgmt_message(f"SUCCESS: LDAP user created. Temporary password: {temp_password}", "success")
+                self.log_user_mgmt_message(f"Message: {message}")
+                self.refresh_user_list_unified()
+                self.clear_user_form()
+            else:
+                self.log_user_mgmt_message(f"ERROR: {message}", "error")
+                print(f"LDAP user creation failed: {message}")
+
+        except Exception as e:
+            self.log_user_mgmt_message(f"LDAP user creation error: {str(e)}", "error")
+    
+    # Authentication Testing Methods
+    def test_ldap_auth_unified(self):
+        """Test LDAP authentication using form fields."""
+        username = self.ldap_user_var.get().strip()
+        password = self.ldap_pass_var.get().strip()
+        
+        if not username or not password:
+            self.log_user_mgmt_message("ERROR: Please enter both username and password for LDAP test", "error")
+            return
+        
+        self.log_user_mgmt_message(f"Testing LDAP authentication for: {username}")
+        
+        try:
+            result = self.ldap_auth.authenticate({
+                'username': username,
+                'password': password
+            })
+            if result[0]:  # result is a tuple (success, data)
+                role_data = result[1] if isinstance(result[1], dict) else {}
+                role = role_data.get('role', 'Unknown') if role_data else 'User'
+                self.log_user_mgmt_message(f"SUCCESS: LDAP authentication successful! User: {username}, Role: {role}", "success")
+            else:
+                error_msg = result[1] if result[1] else "Authentication failed"
+                self.log_user_mgmt_message(f"ERROR: LDAP authentication failed for user: {username} - {error_msg}", "error")
+        except Exception as e:
+            self.log_user_mgmt_message(f"LDAP authentication error: {str(e)}", "error")
+    
+    def test_deepface_auth_unified(self):
+        """Test DeepFace authentication using camera."""
+        self.log_user_mgmt_message("Starting DeepFace camera authentication test...")
+        
+        try:
+            result = self.deepface_auth.authenticate_face(timeout=10)
+            if result:
+                username = result.get('username', 'Unknown')
+                self.log_user_mgmt_message(f"SUCCESS: DeepFace authentication successful! User: {username}", "success")
+            else:
+                self.log_user_mgmt_message("ERROR: DeepFace authentication failed - no match found", "error")
+        except Exception as e:
+            self.log_user_mgmt_message(f"DeepFace authentication error: {str(e)}", "error")
+    
+    def test_fingerprint_auth_unified(self):
+        """Test fingerprint authentication."""
+        self.log_user_mgmt_message("Starting fingerprint authentication test...")
+        
+        try:
+            result = self.biometric_auth.authenticate_fingerprint()
+            if result:
+                self.log_user_mgmt_message(f"SUCCESS: Fingerprint authentication successful! User: {result}", "success")
+            else:
+                self.log_user_mgmt_message("ERROR: Fingerprint authentication failed", "error")
+        except Exception as e:
+            self.log_user_mgmt_message(f"Fingerprint authentication error: {str(e)}", "error")
+    
+    # User Management Methods
+    def refresh_user_list_unified(self):
+        """Refresh the user list from both LDAP and DeepFace systems."""
+        if not hasattr(self, 'user_tree'):
+            return
+            
+        # Clear existing items
+        for item in self.user_tree.get_children():
+            self.user_tree.delete(item)
+        
+        try:
+            # Get LDAP users
+            ldap_users = []
+            try:
+                # LDAP doesn't have a list_users method, skip for now
+                # ldap_users = self.ldap_auth.list_users()
+                ldap_users = []
+            except Exception as e:
+                self.log_user_mgmt_message(f"Warning: Could not retrieve LDAP users: {str(e)}", "warning")
+            
+            # Get DeepFace users
+            deepface_users = []
+            try:
+                deepface_users = self.deepface_auth.list_registered_faces()
+                if not deepface_users:
+                    deepface_users = []
+            except Exception as e:
+                self.log_user_mgmt_message(f"Warning: Could not retrieve DeepFace users: {str(e)}", "warning")
+            
+            # Combine and display users
+            all_usernames = set()
+            
+            # Add LDAP users
+            for user in ldap_users:
+                username = user.get('username', 'Unknown')
+                all_usernames.add(username)
+                
+                self.user_tree.insert('', 'end', values=(
+                    'LDAP',
+                    username,
+                    f"{user.get('first_name', '')} {user.get('last_name', '')}".strip(),
+                    user.get('role', 'Unknown'),
+                    user.get('email', ''),
+                    user.get('created_date', '')
+                ))
+            
+            # Add DeepFace users (only if not already in LDAP)
+            for user in deepface_users:
+                username = user.get('username', 'Unknown')
+                if username not in all_usernames:
+                    self.user_tree.insert('', 'end', values=(
+                        'DeepFace',
+                        username,
+                        f"{user.get('first_name', '')} {user.get('last_name', '')}".strip(),
+                        user.get('role', 'Unknown'),
+                        user.get('email', ''),
+                        user.get('registration_date', '')
+                    ))
+            
+            self.log_user_mgmt_message(f"User list refreshed - LDAP: {len(ldap_users)}, DeepFace: {len(deepface_users)}")
+            
+        except Exception as e:
+            self.log_user_mgmt_message(f"Error refreshing user list: {str(e)}", "error")
+    
+    def delete_selected_user_unified(self):
+        """Delete the selected user from the tree view."""
+        if not hasattr(self, 'user_tree'):
+            return
+            
+        selection = self.user_tree.selection()
+        if not selection:
+            self.log_user_mgmt_message("ERROR: Please select a user to delete", "error")
+            return
+        
+        # Get selected user info
+        item = selection[0]
+        values = self.user_tree.item(item, 'values')
+        system = values[0]
+        username = values[1]
+        
+        self.log_user_mgmt_message(f"Deleting user: {username} from {system} system")
+        
+        try:
+            success = False
+            
+            if system == 'LDAP':
+                success = self.ldap_auth.delete_user(username)
+                if success:
+                    self.log_user_mgmt_message(f"SUCCESS: User {username} deleted from LDAP", "success")
+                else:
+                    self.log_user_mgmt_message(f"ERROR: Failed to delete user {username} from LDAP", "error")
+            
+            elif system == 'DeepFace':
+                success = self.deepface_auth.delete_user(username)
+                if success:
+                    self.log_user_mgmt_message(f"SUCCESS: User {username} deleted from DeepFace", "success")
+                else:
+                    self.log_user_mgmt_message(f"ERROR: Failed to delete user {username} from DeepFace", "error")
+            
+            if success:
+                self.refresh_user_list_unified()
+                
+        except Exception as e:
+            self.log_user_mgmt_message(f"Error deleting user {username}: {str(e)}", "error")
+    
+    # System Information Methods
+    def show_system_status_unified(self):
+        """Show system status information."""
+        self.log_user_mgmt_message("=== SYSTEM STATUS ===")
+        
+        try:
+            # LDAP Status
+            try:
+                # LDAP doesn't have a list_users method, just check availability
+                if self.ldap_auth.is_available():
+                    self.log_user_mgmt_message("LDAP Server: Connected (users count not available)")
+                else:
+                    self.log_user_mgmt_message("LDAP Server: Not available", "warning")
+            except Exception as e:
+                self.log_user_mgmt_message(f"LDAP Server: Error - {str(e)}", "error")
+            
+            # DeepFace Status
+            try:
+                deepface_users = self.deepface_auth.list_registered_faces()
+                self.log_user_mgmt_message(f"DeepFace System: Active ({len(deepface_users)} users)")
+            except Exception as e:
+                self.log_user_mgmt_message(f"DeepFace System: Error - {str(e)}", "error")
+            
+            # Biometric Status
+            try:
+                self.log_user_mgmt_message("Biometric System: Available")
+            except Exception as e:
+                self.log_user_mgmt_message(f"Biometric System: Error - {str(e)}", "error")
+            
+            # Database Status
+            try:
+                db_path = "face_data/deepface_auth.db"
+                if os.path.exists(db_path):
+                    size = os.path.getsize(db_path)
+                    self.log_user_mgmt_message(f"Database: Connected ({size} bytes)")
+                else:
+                    self.log_user_mgmt_message("Database: Not found", "warning")
+            except Exception as e:
+                self.log_user_mgmt_message(f"Database: Error - {str(e)}", "error")
+                
+        except Exception as e:
+            self.log_user_mgmt_message(f"Error checking system status: {str(e)}", "error")
+    
+    def view_security_logs_unified(self):
+        """View recent security logs."""
+        self.log_user_mgmt_message("=== RECENT SECURITY LOGS ===")
+        
+        try:
+            logs_dir = "logs"
+            if not os.path.exists(logs_dir):
+                self.log_user_mgmt_message("Logs directory not found", "warning")
+                return
+            
+            # Get the most recent log file
+            log_files = [f for f in os.listdir(logs_dir) if f.startswith("security_log_")]
+            if not log_files:
+                self.log_user_mgmt_message("No security log files found", "warning")
+                return
+            
+            # Sort by date and get the most recent
+            log_files.sort(reverse=True)
+            recent_log = os.path.join(logs_dir, log_files[0])
+            
+            self.log_user_mgmt_message(f"Showing recent entries from: {log_files[0]}")
+            
+            # Read and display last 10 lines
+            with open(recent_log, 'r') as f:
+                lines = f.readlines()
+                recent_lines = lines[-10:] if len(lines) > 10 else lines
+                
+                for line in recent_lines:
+                    self.log_user_mgmt_message(line.strip())
+            
+        except Exception as e:
+            self.log_user_mgmt_message(f"Error reading security logs: {str(e)}", "error")
         
         # Show camera/detection status
         if self.detection_running:
@@ -1378,12 +1909,7 @@ class SecurityGUI:
     
     def log_user_mgmt_output(self, message: str):
         """Log message to user management output area."""
-        if hasattr(self, 'user_mgmt_output'):
-            timestamp = datetime.now().strftime("%H:%M:%S")
-            formatted_message = f"[{timestamp}] {message}\n"
-            self.user_mgmt_output.insert(tk.END, formatted_message)
-            self.user_mgmt_output.see(tk.END)
-            self.root.update_idletasks()
+        self.log_user_mgmt_message(message, "info")
     
     def register_face_camera(self):
         """Register face from camera."""

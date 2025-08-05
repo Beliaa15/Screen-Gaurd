@@ -75,12 +75,22 @@ class Config:
         Path(cls.LOGS_DIR).mkdir(exist_ok=True)
 
     # LDAP Configuration
-    LDAP_SERVER = "ldap://192.168.1.5"  
+    LDAP_SERVER = "ldap://192.168.1.4"  
     LDAP_BASE_DN = "security-local.com"    
     LDAP_DOMAIN = "security-local"  # Domain for NTLM authentication
     LDAP_ADMIN_GROUP = "SecurityAdmins"
     LDAP_OPERATOR_GROUP = "SecurityOperators"
     LDAP_USER_GROUP = "SecurityUsers"
+    
+    # LDAP Organizational Units for different user types
+    LDAP_ADMIN_OU = "OU=SecuritySystem,DC=security-local,DC=com"  # OU for admin users
+    LDAP_OPERATOR_OU = "OU=SecuritySystem,DC=security-local,DC=com"  # OU for operator users  
+    LDAP_USER_OU = "OU=SecuritySystem,DC=security-local,DC=com"  # OU for regular users
+    
+    # LDAP Admin Credentials (for user creation operations)
+    LDAP_ADMIN_USER = "administrator"  # Admin username
+    LDAP_ADMIN_PASSWORD = "Admin12345"  # Admin password - CHANGE THIS!
+    LDAP_ADMIN_DN = "CN=administrator,CN=Users,DC=security-local,DC=com"  # Full admin DN
     
     # NTLM Authentication Settings
     NTLM_DOMAIN = "security-local"  # Default domain for NTLM
