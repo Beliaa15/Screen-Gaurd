@@ -1,10 +1,11 @@
 """
 GUI Manager for Physical Security System
 Provides full-screen startup screen, login interface, and dashboard.
+Modern themed interface with enhanced visual design.
 """
 
 import tkinter as tk
-from tkinter import ttk, filedialog
+from tkinter import ttk, filedialog, messagebox
 import threading
 import time
 import os
@@ -53,30 +54,234 @@ class SecurityGUI:
         self.ldap_user_var = tk.StringVar()
         self.ldap_pass_var = tk.StringVar()
         
+        # Setup modern theme
+        self.setup_modern_theme()
+        
         # Configure main window
         self.setup_window()
         
-    def setup_window(self):
-        """Configure the main window properties to match alert system security standards."""
-        self.root.title("Physical Security System")
-        self.root.attributes("-fullscreen", True)  # Full screen like alert system
-        self.root.attributes("-topmost", True)     # Always on top like alert system
-        self.root.configure(bg='black')
-        self.root.resizable(False, False)  # Prevent resizing
+    def setup_modern_theme(self):
+        """Setup modern theme and colors for the GUI."""
+        self.style = ttk.Style()
         
-        # Prevent closing like alert system - no escape key exit
+        # Try to use a modern theme
+        available_themes = self.style.theme_names()
+        preferred_themes = ['vista', 'xpnative', 'winnative', 'clam', 'alt', 'default']
+        
+        selected_theme = 'clam'  # Default fallback
+        for theme in preferred_themes:
+            if theme in available_themes:
+                selected_theme = theme
+                break
+        
+        self.style.theme_use(selected_theme)
+        
+        # Modern color scheme
+        self.colors = {
+            'primary': '#1e3a8a',      # Deep blue
+            'primary_light': '#3b82f6', # Light blue
+            'secondary': '#0f172a',     # Dark blue/black
+            'accent': '#06b6d4',        # Cyan
+            'success': '#10b981',       # Green
+            'warning': '#f59e0b',       # Orange
+            'danger': '#ef4444',        # Red
+            'light': '#f8fafc',         # Light gray
+            'dark': '#1f2937',          # Dark gray
+            'surface': '#ffffff',       # White
+            'on_surface': '#374151',    # Text on white
+            'background': '#f1f5f9',    # Light background
+            'card': '#ffffff',          # Card background
+            'border': '#e5e7eb'         # Border color
+        }
+        
+        # Configure modern styles
+        self.configure_modern_styles()
+    
+    def configure_modern_styles(self):
+        """Configure modern ttk styles."""
+        # Modern button styles
+        self.style.configure('Modern.TButton',
+                           background=self.colors['primary'],
+                           foreground='white',
+                           borderwidth=1,
+                           focuscolor='none',
+                           padding=(20, 10))
+        
+        self.style.map('Modern.TButton',
+                      background=[('active', self.colors['primary_light']),
+                                ('pressed', self.colors['secondary'])])
+        
+        # Success button
+        self.style.configure('Success.TButton',
+                           background=self.colors['success'],
+                           foreground='white',
+                           borderwidth=1,
+                           focuscolor='none',
+                           padding=(20, 10))
+        
+        # Danger button
+        self.style.configure('Danger.TButton',
+                           background=self.colors['danger'],
+                           foreground='white',
+                           borderwidth=1,
+                           focuscolor='none',
+                           padding=(20, 10))
+        
+        # Warning button
+        self.style.configure('Warning.TButton',
+                           background=self.colors['warning'],
+                           foreground='white',
+                           borderwidth=1,
+                           focuscolor='none',
+                           padding=(20, 10))
+        
+        # Modern entry style
+        self.style.configure('Modern.TEntry',
+                           fieldbackground='white',
+                           borderwidth=1,
+                           relief='solid',
+                           padding=(10, 8))
+        
+        # Modern frame style
+        self.style.configure('Card.TFrame',
+                           background=self.colors['card'],
+                           relief='flat',
+                           borderwidth=1)
+        
+        # Modern treeview style
+        self.style.configure('Modern.Treeview',
+                           background=self.colors['surface'],
+                           foreground=self.colors['on_surface'],
+                           fieldbackground=self.colors['surface'],
+                           borderwidth=0,
+                           font=('Segoe UI', 9))
+        self.style.configure('Modern.Treeview.Heading',
+                           background=self.colors['primary'],
+                           foreground='white',
+                           font=('Segoe UI', 10, 'bold'))
+        self.style.map('Modern.Treeview',
+                      background=[('selected', self.colors['primary_light'])])
+        self.style.map('Modern.Treeview.Heading',
+                      background=[('active', self.colors['primary_light'])])
+        
+        # Modern label style
+        self.style.configure('Heading.TLabel',
+                           background=self.colors['card'],
+                           foreground=self.colors['on_surface'],
+                           font=('Segoe UI', 14, 'bold'))
+        
+        self.style.configure('Body.TLabel',
+                           background=self.colors['card'],
+                           foreground=self.colors['on_surface'],
+                           font=('Segoe UI', 10))
+        
+        # Modern treeview
+        self.style.configure('Modern.Treeview',
+                           background='white',
+                           foreground=self.colors['on_surface'],
+                           fieldbackground='white',
+                           borderwidth=1,
+                           relief='solid')
+        
+        self.style.configure('Modern.Treeview.Heading',
+                           background=self.colors['primary'],
+                           foreground='white',
+                           relief='flat',
+                           borderwidth=1)
+        
+    def setup_window(self):
+        """Configure the main window properties with modern styling."""
+        self.root.title("Physical Security System")
+        self.root.attributes("-fullscreen", True)
+        self.root.attributes("-topmost", True)
+        self.root.configure(bg=self.colors['background'])
+        self.root.resizable(False, False)
+        
+        # Security: Prevent closing
         self.root.protocol("WM_DELETE_WINDOW", lambda: None)
         
-        # Remove escape key binding - security requirement like alerts
-        # No escape key exit allowed - unified with alert system behavior
-        
-        # Additional security: disable Alt+F4 and other common exit shortcuts
+        # Disable keyboard shortcuts for security
         self.root.bind('<Alt-F4>', lambda e: None)
         self.root.bind('<Control-c>', lambda e: None)
         self.root.bind('<Control-C>', lambda e: None)
         
-        # Setup window event handlers for minimize/restore detection
+        # Setup window event handlers
         self.setup_window_events()
+        
+    def create_modern_button(self, parent, text, command, style='Modern.TButton', **kwargs):
+        """Create a modern styled button."""
+        return ttk.Button(parent, text=text, command=command, style=style, **kwargs)
+    
+    def create_modern_entry(self, parent, textvariable=None, show=None, width=None, **kwargs):
+        """Create a modern styled entry widget that returns the actual entry."""        
+        # Create the actual entry widget with modern styling
+        entry = tk.Entry(parent, 
+                        textvariable=textvariable, 
+                        show=show,
+                        width=width or 40,
+                        font=("Segoe UI", 10), 
+                        bg=self.colors['surface'], 
+                        fg=self.colors['on_surface'], 
+                        relief='solid', 
+                        bd=1,
+                        insertbackground=self.colors['on_surface'],
+                        highlightthickness=1,
+                        highlightcolor=self.colors['primary'],
+                        highlightbackground=self.colors['border'],
+                        **kwargs)
+        
+        # Return the actual entry widget
+        return entry
+    
+    def create_gradient_frame(self, parent, color1, color2, height=100):
+        """Create a gradient-like frame using canvas."""
+        canvas = tk.Canvas(parent, height=height, highlightthickness=0, bd=0, relief='flat')
+        canvas.pack(fill='x')
+        
+        def hex_to_rgb(hex_color):
+            """Convert hex color to RGB tuple."""
+            hex_color = hex_color.lstrip('#')
+            return tuple(int(hex_color[i:i+2], 16) for i in (0, 2, 4))
+        
+        def rgb_to_hex(rgb):
+            """Convert RGB tuple to hex color."""
+            return "#{:02x}{:02x}{:02x}".format(int(rgb[0]), int(rgb[1]), int(rgb[2]))
+        
+        def interpolate_color(color1, color2, ratio):
+            """Interpolate between two colors."""
+            rgb1 = hex_to_rgb(color1)
+            rgb2 = hex_to_rgb(color2)
+            
+            r = rgb1[0] + (rgb2[0] - rgb1[0]) * ratio
+            g = rgb1[1] + (rgb2[1] - rgb1[1]) * ratio
+            b = rgb1[2] + (rgb2[2] - rgb1[2]) * ratio
+            
+            return rgb_to_hex((r, g, b))
+        
+        def draw_gradient():
+            width = canvas.winfo_width()
+            if width > 1:
+                canvas.delete("all")
+                # Create smooth gradient with more steps for better quality
+                steps = min(height, 100)  # Limit steps for performance
+                step_height = height / steps
+                
+                for i in range(steps):
+                    y1 = int(i * step_height)
+                    y2 = int((i + 1) * step_height)
+                    ratio = i / (steps - 1) if steps > 1 else 0
+                    
+                    gradient_color = interpolate_color(color1, color2, ratio)
+                    canvas.create_rectangle(0, y1, width, y2, 
+                                          fill=gradient_color, outline=gradient_color)
+        
+        # Bind the gradient drawing to canvas configuration
+        canvas.bind('<Configure>', lambda e: canvas.after_idle(draw_gradient))
+        
+        # Draw initial gradient
+        canvas.after_idle(draw_gradient)
+        
+        return canvas
         
     def maintain_security_properties(self):
         """Ensure security properties are maintained - call this periodically."""
@@ -93,118 +298,133 @@ class SecurityGUI:
         self.maintain_security_properties()
     
     def show_custom_dialog(self, title, message, dialog_type="info", input_field=False, password=False, callback=None):
-        """Show a custom dialog within the GUI."""
-        # Create overlay
-        self.dialog_overlay = tk.Frame(self.root, bg='black')
+        """Show a modern custom dialog within the GUI."""
+        # Create modern overlay with semi-transparent background
+        self.dialog_overlay = tk.Frame(self.root, bg='#000000')
         self.dialog_overlay.place(x=0, y=0, relwidth=1, relheight=1)
-        self.dialog_overlay.configure(bg='black')
-        self.dialog_overlay.attributes = lambda: None  # Prevent attribute errors
+        self.dialog_overlay.configure(bg='#404040')  # Dark gray instead of transparent
         
-        # Center the dialog
-        dialog_frame = tk.Frame(self.dialog_overlay, bg='darkblue', bd=3, relief='raised')
-        dialog_frame.place(relx=0.5, rely=0.5, anchor='center', width=500, height=300)
+        # Modern dialog frame with rounded appearance
+        dialog_frame = tk.Frame(self.dialog_overlay, bg=self.colors['card'], 
+                               relief='flat', bd=0)
+        dialog_frame.place(relx=0.5, rely=0.5, anchor='center', width=480, height=320)
         
-        # Title
-        title_label = tk.Label(
-            dialog_frame,
-            text=title,
-            fg="white",
-            bg="darkblue",
-            font=("Helvetica", 16, "bold")
-        )
-        title_label.pack(pady=20)
+        # Add subtle shadow effect
+        shadow_frame = tk.Frame(self.dialog_overlay, bg='#808080', relief='flat', bd=0)
+        shadow_frame.place(relx=0.5, rely=0.5, anchor='center', width=485, height=325)
         
-        # Message
-        message_label = tk.Label(
-            dialog_frame,
-            text=message,
-            fg="lightgray",
-            bg="darkblue",
-            font=("Helvetica", 12),
-            wraplength=400,
-            justify='center'
-        )
-        message_label.pack(pady=10)
+        # Bring dialog to front
+        dialog_frame.lift()
         
-        # Input field if needed
+        # Modern header with icon and title
+        header_frame = tk.Frame(dialog_frame, bg=self.colors['primary'], height=60)
+        header_frame.pack(fill='x')
+        header_frame.pack_propagate(False)
+        
+        # Dialog icon based on type
+        icons = {
+            "info": "ℹ️",
+            "success": "✅", 
+            "warning": "⚠️",
+            "error": "❌",
+            "question": "❓",
+            "yesno": "❓"
+        }
+        icon = icons.get(dialog_type, "ℹ️")
+        
+        icon_label = tk.Label(header_frame, text=icon, 
+                             bg=self.colors['primary'], fg='white',
+                             font=("Segoe UI", 20))
+        icon_label.pack(side='left', padx=20, pady=15)
+        
+        title_label = tk.Label(header_frame, text=title,
+                              bg=self.colors['primary'], fg='white',
+                              font=("Segoe UI", 14, "bold"))
+        title_label.pack(side='left', pady=15)
+        
+        # Content area
+        content_frame = tk.Frame(dialog_frame, bg=self.colors['card'])
+        content_frame.pack(fill='both', expand=True, padx=30, pady=20)
+        
+        # Modern message display
+        message_label = tk.Label(content_frame, text=message,
+                               fg=self.colors['on_surface'], bg=self.colors['card'],
+                               font=("Segoe UI", 11), wraplength=400, justify='left')
+        message_label.pack(pady=(0, 20))
+        
+        # Modern input field if needed
         self.dialog_input = None
         if input_field:
-            self.dialog_input = tk.Entry(
-                dialog_frame,
-                font=("Helvetica", 12),
-                width=30,
-                show="*" if password else ""
-            )
-            self.dialog_input.pack(pady=20)
+            input_label = tk.Label(content_frame, text="Enter value:",
+                                 fg=self.colors['on_surface'], bg=self.colors['card'],
+                                 font=("Segoe UI", 10, "bold"))
+            input_label.pack(anchor='w', pady=(0, 5))
+            
+            self.dialog_input = tk.Entry(content_frame,
+                                       font=("Segoe UI", 11), bg=self.colors['surface'],
+                                       fg=self.colors['on_surface'], relief='flat', bd=0,
+                                       insertbackground=self.colors['on_surface'],
+                                       show="*" if password else "")
+            
+            # Style the entry with a border frame
+            input_frame = tk.Frame(content_frame, bg=self.colors['border'], 
+                                 relief='solid', bd=1)
+            input_frame.pack(fill='x', pady=(0, 20))
+            self.dialog_input.pack(in_=input_frame, padx=8, pady=6, fill='x')
             self.dialog_input.focus_set()
         
-        # Buttons frame
-        buttons_frame = tk.Frame(dialog_frame, bg='darkblue')
-        buttons_frame.pack(pady=20)
+        # Modern buttons frame
+        buttons_frame = tk.Frame(content_frame, bg=self.colors['card'])
+        buttons_frame.pack(side='bottom', pady=(10, 0))
         
         if dialog_type == "yesno":
-            # Yes button
-            yes_btn = tk.Button(
-                buttons_frame,
-                text="Yes",
-                command=lambda: self._close_dialog_with_result(True, callback),
-                font=("Helvetica", 12, "bold"),
-                bg="green",
-                fg="white",
-                width=10
-            )
-            yes_btn.pack(side='left', padx=10)
+            # Modern Yes button
+            yes_btn = tk.Button(buttons_frame, text="✓ Yes",
+                              command=lambda: self._close_dialog_with_result(True, callback),
+                              font=("Segoe UI", 10, "bold"), bg=self.colors['success'], 
+                              fg='white', relief='flat', bd=0, padx=20, pady=8)
+            yes_btn.pack(side='left', padx=(0, 10))
             
-            # No button
-            no_btn = tk.Button(
-                buttons_frame,
-                text="No",
-                command=lambda: self._close_dialog_with_result(False, callback),
-                font=("Helvetica", 12, "bold"),
-                bg="red",
-                fg="white",
-                width=10
-            )
-            no_btn.pack(side='left', padx=10)
+            # Modern No button  
+            no_btn = tk.Button(buttons_frame, text="✗ No",
+                             command=lambda: self._close_dialog_with_result(False, callback),
+                             font=("Segoe UI", 10, "bold"), bg=self.colors['danger'], 
+                             fg='white', relief='flat', bd=0, padx=20, pady=8)
+            no_btn.pack(side='left')
+            
         elif input_field:
-            # OK button for input
-            ok_btn = tk.Button(
-                buttons_frame,
-                text="OK",
-                command=lambda: self._close_dialog_with_input(callback),
-                font=("Helvetica", 12, "bold"),
-                bg="blue",
-                fg="white",
-                width=10
-            )
-            ok_btn.pack(side='left', padx=10)
+            # Modern OK button for input
+            ok_btn = tk.Button(buttons_frame, text="✓ Confirm",
+                             command=lambda: self._close_dialog_with_input(callback),
+                             font=("Segoe UI", 10, "bold"), bg=self.colors['primary'], 
+                             fg='white', relief='flat', bd=0, padx=20, pady=8)
+            ok_btn.pack(side='left', padx=(0, 10))
             
-            # Cancel button for input
-            cancel_btn = tk.Button(
-                buttons_frame,
-                text="Cancel",
-                command=lambda: self._close_dialog_with_result(None, callback),
-                font=("Helvetica", 12, "bold"),
-                bg="gray",
-                fg="white",
-                width=10
-            )
-            cancel_btn.pack(side='left', padx=10)
+            # Modern Cancel button
+            cancel_btn = tk.Button(buttons_frame, text="✗ Cancel",
+                                 command=lambda: self._close_dialog_with_result(None, callback),
+                                 font=("Segoe UI", 10, "bold"), bg=self.colors['dark'], 
+                                 fg='white', relief='flat', bd=0, padx=20, pady=8)
+            cancel_btn.pack(side='left')
             
-            # Bind Enter key
+            # Bind Enter key for quick confirmation
             if self.dialog_input:
                 self.dialog_input.bind('<Return>', lambda e: self._close_dialog_with_input(callback))
+                self.dialog_input.bind('<Escape>', lambda e: self._close_dialog_with_result(None, callback))
         else:
-            # OK button for info/error
-            ok_btn = tk.Button(
-                buttons_frame,
-                text="OK",
-                command=lambda: self._close_dialog_with_result(True, callback),
-                font=("Helvetica", 12, "bold"),
-                bg="blue",
-                fg="white",
-                width=15
-            )
+            # Modern OK button for info/error dialogs
+            button_colors = {
+                "info": self.colors['primary'],
+                "success": self.colors['success'], 
+                "warning": self.colors['warning'],
+                "error": self.colors['danger']
+            }
+            button_color = button_colors.get(dialog_type, self.colors['primary'])
+            
+            ok_btn = tk.Button(buttons_frame, text="✓ OK",
+                             command=lambda: self._close_dialog_with_result(True, callback),
+                             font=("Segoe UI", 10, "bold"), bg=button_color, 
+                             fg='white', relief='flat', bd=0, padx=30, pady=8)
             ok_btn.pack()
     
     def _close_dialog_with_result(self, result, callback):
@@ -232,73 +452,119 @@ class SecurityGUI:
         return self.is_authenticated
     
     def show_startup_screen(self):
-        """Show the startup screen with loading animation."""
+        """Show the modern startup screen with loading animation."""
         self.clear_screen()
         self.current_screen = "startup"
         
-        # Main container
-        main_frame = tk.Frame(self.root, bg='black')
+        # Main container with solid background
+        main_frame = tk.Frame(self.root, bg=self.colors['background'])
         main_frame.pack(expand=True, fill='both')
         
-        # Center frame for vertical centering
-        center_frame = tk.Frame(main_frame, bg='black')
-        center_frame.pack(expand=True)
+        # Header with modern solid color
+        header_frame = tk.Frame(main_frame, bg=self.colors['primary'], height=120)
+        header_frame.pack(fill='x')
+        header_frame.pack_propagate(False)
         
-        # Logo/Icon
+        header_title = tk.Label(
+            header_frame,
+            text="🔒 PHYSICAL SECURITY SYSTEM",
+            fg='white',
+            bg=self.colors['primary'],
+            font=("Segoe UI", 24, "bold")
+        )
+        header_title.pack(expand=True)
+        
+        # Center frame for content
+        center_frame = tk.Frame(main_frame, bg=self.colors['background'])
+        center_frame.pack(expand=True, fill='both')
+        
+        # Modern logo container
+        logo_frame = tk.Frame(center_frame, bg=self.colors['background'])
+        logo_frame.pack(expand=True)
+        
+        # Logo with modern styling
         logo_label = tk.Label(
-            center_frame,
+            logo_frame,
             text="🔒",
-            fg="cyan",
-            bg="black",
-            font=("Helvetica", 120, "bold")
+            fg=self.colors['primary'],
+            bg=self.colors['background'],
+            font=("Segoe UI", 100, "bold")
         )
-        logo_label.pack(pady=(100, 30))
+        logo_label.pack(pady=(50, 20))
         
-        # Title
+        # Modern title
         title_label = tk.Label(
-            center_frame,
+            logo_frame,
             text="PHYSICAL SECURITY SYSTEM",
-            fg="white",
-            bg="black",
-            font=("Helvetica", 32, "bold")
+            fg=self.colors['on_surface'],
+            bg=self.colors['background'],
+            font=("Segoe UI", 28, "bold")
         )
-        title_label.pack(pady=(0, 10))
+        title_label.pack(pady=(0, 5))
         
-        # Subtitle
+        # Subtitle with modern typography
         subtitle_label = tk.Label(
-            center_frame,
+            logo_frame,
             text="Advanced Object Detection & Access Control",
-            fg="gray",
-            bg="black",
-            font=("Helvetica", 16)
+            fg=self.colors['primary'],
+            bg=self.colors['background'],
+            font=("Segoe UI", 14, "normal")
         )
-        subtitle_label.pack(pady=(0, 50))
+        subtitle_label.pack(pady=(0, 30))
         
-        # Loading label
+        # Modern loading card
+        loading_card = self.create_modern_card(logo_frame, "System Status")
+        loading_card.pack(pady=20, padx=50, fill='x')
+        
+        # Loading label with modern font
         self.loading_label = tk.Label(
-            center_frame,
+            loading_card,
             text="Initializing System...",
-            fg="cyan",
-            bg="black",
-            font=("Helvetica", 14)
+            fg=self.colors['primary'],
+            bg=self.colors['card'],
+            font=("Segoe UI", 12, "normal")
         )
-        self.loading_label.pack(pady=(0, 20))
+        self.loading_label.pack(pady=15)
         
-        # Progress dots
-        self.progress_label = tk.Label(
-            center_frame,
-            text="",
-            fg="cyan",
-            bg="black",
-            font=("Helvetica", 20)
-        )
-        self.progress_label.pack()
+        # Modern progress indicator
+        self.progress_frame = tk.Frame(loading_card, bg=self.colors['card'])
+        self.progress_frame.pack(pady=(0, 15))
         
-        # Start loading animation
-        self.animate_loading()
+        # Progress dots with animation
+        self.progress_dots = []
+        for i in range(3):
+            dot = tk.Label(
+                self.progress_frame,
+                text="●",
+                fg=self.colors['primary_light'],
+                bg=self.colors['card'],
+                font=("Segoe UI", 16)
+            )
+            dot.pack(side='left', padx=5)
+            self.progress_dots.append(dot)
         
-        # Auto-proceed to login after 3 seconds
-        self.root.after(3000, self.show_login_screen)
+        # Start modern loading animation
+        self.animate_modern_loading()
+
+        # Auto-proceed to login after 2.5 seconds
+        self.root.after(2500, self.show_login_screen)
+        
+    def animate_modern_loading(self):
+        """Modern loading animation with color-changing dots."""
+        def update_dots():
+            for cycle in range(6):  # 6 animation cycles
+                for i in range(len(self.progress_dots)):
+                    # Reset all dots
+                    for dot in self.progress_dots:
+                        dot.config(fg=self.colors['border'])
+                    
+                    # Highlight current dot
+                    if i < len(self.progress_dots):
+                        self.progress_dots[i].config(fg=self.colors['accent'])
+                    
+                    time.sleep(0.3)
+        
+        threading.Thread(target=update_dots, daemon=True).start()
         
     def animate_loading(self):
         """Animate loading dots."""
@@ -314,49 +580,65 @@ class SecurityGUI:
         threading.Thread(target=update_dots, daemon=True).start()
     
     def show_login_screen(self):
-        """Show the login/authentication screen."""
-            
+        """Show the modern login/authentication screen."""
         self.clear_screen()
         self.current_screen = "login"
         
-        # Main container
-        main_frame = tk.Frame(self.root, bg='darkblue')
+        # Main container with modern background
+        main_frame = tk.Frame(self.root, bg=self.colors['background'])
         main_frame.pack(expand=True, fill='both')
         
-        # Header
-        header_frame = tk.Frame(main_frame, bg='darkblue', height=100)
-        header_frame.pack(fill='x', padx=20, pady=20)
+        # Header with gradient
+        header_frame = tk.Frame(main_frame, bg=self.colors['primary'], height=120)
+        header_frame.pack(fill='x')
         header_frame.pack_propagate(False)
         
+        # Header content
+        header_content = tk.Frame(header_frame, bg=self.colors['primary'])
+        header_content.pack(expand=True, fill='both', padx=40, pady=20)
+        
         title_label = tk.Label(
-            header_frame,
+            header_content,
             text="🔐 SYSTEM AUTHENTICATION",
-            fg="white",
-            bg="darkblue",
-            font=("Helvetica", 24, "bold")
+            fg='white',
+            bg=self.colors['primary'],
+            font=("Segoe UI", 24, "bold")
         )
         title_label.pack(expand=True)
         
-        # Center authentication frame
-        auth_frame = tk.Frame(main_frame, bg='darkblue')
-        auth_frame.pack(expand=True)
+        # Center authentication frame with compact design
+        auth_container = tk.Frame(main_frame, bg=self.colors['background'])
+        auth_container.pack(expand=True, fill='both')
         
-        # Welcome message
+        # Center the cards horizontally and vertically with proper sizing
+        cards_frame = tk.Frame(auth_container, bg=self.colors['background'])
+        cards_frame.pack(expand=True)
+        
+        # Welcome card - compact size
+        welcome_card = self.create_modern_card(cards_frame, "Welcome")
+        welcome_card.pack(pady=(50, 20), padx=50)
+        
         welcome_label = tk.Label(
-            auth_frame,
-            text="Please authenticate to access the security system",
-            fg="lightgray",
-            bg="darkblue",
-            font=("Helvetica", 16)
+            welcome_card,
+            text="Please select your authentication method to access the security system",
+            fg=self.colors['on_surface'],
+            bg=self.colors['card'],
+            font=("Segoe UI", 14, "normal"),
+            wraplength=500,
+            justify='center'
         )
-        welcome_label.pack(pady=(0, 40))
+        welcome_label.pack(pady=20, padx=30)
         
-        # Authentication method buttons
-        self.create_auth_method_buttons(auth_frame)
+        # Authentication methods card - compact size
+        methods_card = self.create_modern_card(cards_frame, "Authentication Methods")
+        methods_card.pack(pady=10, padx=50)
+        
+        # Create modern authentication buttons
+        self.create_modern_auth_buttons(methods_card)
         
         # Footer with system info
-        footer_frame = tk.Frame(main_frame, bg='darkblue', height=80)
-        footer_frame.pack(fill='x', side='bottom', padx=20, pady=10)
+        footer_frame = tk.Frame(main_frame, bg=self.colors['primary'], height=60)
+        footer_frame.pack(fill='x', side='bottom')
         footer_frame.pack_propagate(False)
         
         sys_info = SecurityUtils.get_system_info()
@@ -364,61 +646,107 @@ class SecurityGUI:
         footer_label = tk.Label(
             footer_frame,
             text=footer_text,
-            fg="gray",
-            bg="darkblue",
-            font=("Courier", 10)
+            fg='white',
+            bg=self.colors['primary'],
+            font=("Segoe UI", 10, "normal")
         )
         footer_label.pack(expand=True)
         
-    def create_auth_method_buttons(self, parent):
-        """Create authentication method selection buttons."""
-        methods_frame = tk.Frame(parent, bg='darkblue')
-        methods_frame.pack(pady=20)
+    def create_modern_auth_buttons(self, parent):
+        """Create modern authentication method buttons."""
+        methods_frame = tk.Frame(parent, bg=self.colors['card'])
+        methods_frame.pack(pady=20, padx=30)
         
-        # Email & Password button
+        # Create a compact layout for buttons
+        buttons_container = tk.Frame(methods_frame, bg=self.colors['card'])
+        buttons_container.pack()
+        
+        # Email & Password button with icon - compact width
+        email_frame = tk.Frame(buttons_container, bg=self.colors['success'], relief='flat', bd=0)
+        email_frame.pack(pady=10, fill='x')
+        
         email_btn = tk.Button(
-            methods_frame,
-            text="📧 Email & Password",
+            email_frame,
+            text="📧  Email & Password Authentication",
             command=lambda: self.select_auth_method("email_password"),
-            font=("Helvetica", 16, "bold"),
-            bg="green",
-            fg="white",
-            width=20,
-            height=3,
-            relief="raised",
-            bd=3
+            font=("Segoe UI", 14, "bold"),
+            bg=self.colors['success'],
+            fg='white',
+            relief='flat',
+            bd=0,
+            padx=30,
+            pady=12,
+            cursor='hand2',
+            width=35
         )
-        email_btn.pack(pady=10)
+        email_btn.pack()
         
-        # Fingerprint button
+        # Add hover effects
+        def on_enter_email(e):
+            email_btn.config(bg=self.colors['primary_light'])
+        def on_leave_email(e):
+            email_btn.config(bg=self.colors['success'])
+        
+        email_btn.bind("<Enter>", on_enter_email)
+        email_btn.bind("<Leave>", on_leave_email)
+        
+        # Fingerprint button - compact width
+        fingerprint_frame = tk.Frame(buttons_container, bg=self.colors['primary'], relief='flat', bd=0)
+        fingerprint_frame.pack(pady=10, fill='x')
+        
         fingerprint_btn = tk.Button(
-            methods_frame,
-            text="👆 Fingerprint",
+            fingerprint_frame,
+            text="👆  Fingerprint Authentication",
             command=lambda: self.select_auth_method("fingerprint"),
-            font=("Helvetica", 16, "bold"),
-            bg="blue",
-            fg="white",
-            width=20,
-            height=3,
-            relief="raised",
-            bd=3
+            font=("Segoe UI", 14, "bold"),
+            bg=self.colors['primary'],
+            fg='white',
+            relief='flat',
+            bd=0,
+            padx=30,
+            pady=12,
+            cursor='hand2',
+            width=35
         )
-        fingerprint_btn.pack(pady=10)
+        fingerprint_btn.pack()
         
-        # DeepFace Recognition button (Advanced)
+        # Add hover effects
+        def on_enter_finger(e):
+            fingerprint_btn.config(bg=self.colors['primary_light'])
+        def on_leave_finger(e):
+            fingerprint_btn.config(bg=self.colors['primary'])
+        
+        fingerprint_btn.bind("<Enter>", on_enter_finger)
+        fingerprint_btn.bind("<Leave>", on_leave_finger)
+        
+        # DeepFace button - compact width
+        deepface_frame = tk.Frame(buttons_container, bg=self.colors['warning'], relief='flat', bd=0)
+        deepface_frame.pack(pady=10, fill='x')
+        
         deepface_btn = tk.Button(
-            methods_frame,
-            text="🧠 Face Recognition",
+            deepface_frame,
+            text="🧠  Advanced Face Recognition",
             command=lambda: self.select_auth_method("deepface"),
-            font=("Helvetica", 16, "bold"),
-            bg="darkviolet",
-            fg="white",
-            width=20,
-            height=3,
-            relief="raised",
-            bd=3
+            font=("Segoe UI", 14, "bold"),
+            bg=self.colors['warning'],
+            fg='white',
+            relief='flat',
+            bd=0,
+            padx=30,
+            pady=12,
+            cursor='hand2',
+            width=35
         )
-        deepface_btn.pack(pady=10)
+        deepface_btn.pack()
+        
+        # Add hover effects
+        def on_enter_deep(e):
+            deepface_btn.config(bg=self.colors['primary_light'])
+        def on_leave_deep(e):
+            deepface_btn.config(bg=self.colors['warning'])
+        
+        deepface_btn.bind("<Enter>", on_enter_deep)
+        deepface_btn.bind("<Leave>", on_leave_deep)
     
     def select_auth_method(self, method):
         """Handle authentication method selection."""
@@ -434,150 +762,211 @@ class SecurityGUI:
         self.show_login_screen()
     
     def show_domain_auth_form(self):
-        """Show domain authentication form."""
+        """Show modern domain authentication form."""
         self.clear_screen()
         self.current_screen = "password_form"
         
-        # Main container
-        main_frame = tk.Frame(self.root, bg='darkgreen')
+        # Main container with modern background
+        main_frame = tk.Frame(self.root, bg=self.colors['background'])
         main_frame.pack(expand=True, fill='both')
         
-        # Center frame
-        center_frame = tk.Frame(main_frame, bg='darkgreen')
-        center_frame.pack(expand=True)
+        # Header with success color
+        header_frame = tk.Frame(main_frame, bg=self.colors['success'], height=100)
+        header_frame.pack(fill='x')
+        header_frame.pack_propagate(False)
         
-        # Title
         title_label = tk.Label(
-            center_frame,
+            header_frame,
             text="📧 EMAIL & PASSWORD AUTHENTICATION",
-            fg="white",
-            bg="darkgreen",
-            font=("Helvetica", 20, "bold")
+            fg='white',
+            bg=self.colors['success'],
+            font=("Segoe UI", 20, "bold")
         )
-        title_label.pack(pady=(50, 30))
+        title_label.pack(expand=True)
         
-        # Form frame
-        form_frame = tk.Frame(center_frame, bg='darkgreen')
-        form_frame.pack(pady=20)
+        # Center frame for form - compact design
+        center_container = tk.Frame(main_frame, bg=self.colors['background'])
+        center_container.pack(expand=True, fill='both')
         
-        # Username field (with domain format example)
+        # Form card - centered with pack
+        form_frame = tk.Frame(center_container, bg=self.colors['background'])
+        form_frame.pack(expand=True)
+        
+        form_card = self.create_modern_card(form_frame, "Enter your credentials")
+        form_card.pack(pady=50, padx=100)
+        
+        form_content = tk.Frame(form_card, bg=self.colors['card'])
+        form_content.pack(padx=40, pady=30)
+        
+        # Username field
         username_label = tk.Label(
-            form_frame, 
-            text="Username:", 
-            fg="white", 
-            bg="darkgreen", 
-            font=("Helvetica", 14)
+            form_content,
+            text="Username:",
+            fg=self.colors['on_surface'],
+            bg=self.colors['card'],
+            font=("Segoe UI", 12, "bold")
         )
-        username_label.pack(anchor='w')
+        username_label.pack(anchor='w', pady=(0, 5))
         
-        self.email_entry = tk.Entry(form_frame, font=("Helvetica", 12), width=35)
-        self.email_entry.pack(pady=(5, 15))
+        self.email_entry = self.create_modern_entry(form_content, width=30)
+        self.email_entry.pack(pady=(0, 20))
         self.email_entry.focus_set()
         
         # Password field
-        tk.Label(form_frame, text="Password:", fg="white", bg="darkgreen", font=("Helvetica", 14)).pack(anchor='w')
-        self.password_entry = tk.Entry(form_frame, show="*", font=("Helvetica", 12), width=35)
-        self.password_entry.pack(pady=(5, 20))
+        password_label = tk.Label(
+            form_content,
+            text="Password:",
+            fg=self.colors['on_surface'],
+            bg=self.colors['card'],
+            font=("Segoe UI", 12, "bold")
+        )
+        password_label.pack(anchor='w', pady=(0, 5))
+        
+        self.password_entry = self.create_modern_entry(form_content, show="*", width=30)
+        self.password_entry.pack(pady=(0, 30))
         
         # Bind Enter key
         self.password_entry.bind('<Return>', lambda e: self.attempt_password_login())
         
         # Buttons frame
-        buttons_frame = tk.Frame(center_frame, bg='darkgreen')
-        buttons_frame.pack(pady=20)
+        buttons_frame = tk.Frame(form_content, bg=self.colors['card'])
+        buttons_frame.pack(fill='x')
         
         # Login button
         login_btn = tk.Button(
             buttons_frame,
             text="✓ Login",
             command=self.attempt_password_login,
-            font=("Helvetica", 14, "bold"),
-            bg="green",
-            fg="white",
-            width=15,
-            height=2
+            font=("Segoe UI", 14, "bold"),
+            bg=self.colors['success'],
+            fg='white',
+            relief='flat',
+            bd=0,
+            padx=30,
+            pady=12,
+            cursor='hand2'
         )
-        login_btn.pack(side='left', padx=10)
+        login_btn.pack(side='left', padx=(0, 15))
         
         # Back button
         back_btn = tk.Button(
             buttons_frame,
             text="← Back",
             command=self.show_method_selection,
-            font=("Helvetica", 14, "bold"),
-            bg="gray",
-            fg="white",
-            width=15,
-            height=2
+            font=("Segoe UI", 14, "bold"),
+            bg=self.colors['dark'],
+            fg='white',
+            relief='flat',
+            bd=0,
+            padx=30,
+            pady=12,
+            cursor='hand2'
         )
-        back_btn.pack(side='left', padx=10)
+        back_btn.pack(side='left')
+        
+        # Add hover effects
+        def on_enter_login(e):
+            login_btn.config(bg=self.colors['primary'])
+        def on_leave_login(e):
+            login_btn.config(bg=self.colors['success'])
+        
+        def on_enter_back(e):
+            back_btn.config(bg=self.colors['on_surface'])
+        def on_leave_back(e):
+            back_btn.config(bg=self.colors['dark'])
+        
+        login_btn.bind("<Enter>", on_enter_login)
+        login_btn.bind("<Leave>", on_leave_login)
+        back_btn.bind("<Enter>", on_enter_back)
+        back_btn.bind("<Leave>", on_leave_back)
     
     def show_fingerprint_auth(self):
         """Show fingerprint authentication screen."""
         self.clear_screen()
         self.current_screen = "fingerprint"
         
-        # Main container
-        main_frame = tk.Frame(self.root, bg='darkblue')
+        # Main container with modern background
+        main_frame = tk.Frame(self.root, bg=self.colors['background'])
         main_frame.pack(expand=True, fill='both')
         
-        # Center frame
-        center_frame = tk.Frame(main_frame, bg='darkblue')
-        center_frame.pack(expand=True)
+        # Header with primary color
+        header_frame = tk.Frame(main_frame, bg=self.colors['primary'], height=100)
+        header_frame.pack(fill='x')
+        header_frame.pack_propagate(False)
         
-        # Title
         title_label = tk.Label(
-            center_frame,
+            header_frame,
             text="👆 FINGERPRINT AUTHENTICATION",
-            fg="white",
-            bg="darkblue",
-            font=("Helvetica", 20, "bold")
+            fg='white',
+            bg=self.colors['primary'],
+            font=("Segoe UI", 20, "bold")
         )
-        title_label.pack(pady=(50, 30))
+        title_label.pack(expand=True)
         
-        # Fingerprint icon (animated)
+        # Center container - compact design
+        center_container = tk.Frame(main_frame, bg=self.colors['background'])
+        center_container.pack(expand=True, fill='both')
+        
+        # Authentication card - centered with pack
+        auth_frame = tk.Frame(center_container, bg=self.colors['background'])
+        auth_frame.pack(expand=True)
+        
+        auth_card = self.create_modern_card(auth_frame, "Biometric Authentication")
+        auth_card.pack(pady=50, padx=100)
+        
+        auth_content = tk.Frame(auth_card, bg=self.colors['card'])
+        auth_content.pack(padx=50, pady=30)
+        
+        # Fingerprint icon
         self.fingerprint_icon = tk.Label(
-            center_frame,
+            auth_content,
             text="👆",
-            fg="cyan",
-            bg="darkblue",
-            font=("Helvetica", 80)
+            fg=self.colors['primary'],
+            bg=self.colors['card'],
+            font=("Segoe UI", 80, "bold")
         )
-        self.fingerprint_icon.pack(pady=20)
+        self.fingerprint_icon.pack(pady=(20, 30))
         
         # Instructions
         instructions_label = tk.Label(
-            center_frame,
+            auth_content,
             text="Place your finger on the sensor\nand wait for authentication",
-            fg="lightgray",
-            bg="darkblue",
-            font=("Helvetica", 16),
+            fg=self.colors['on_surface'],
+            bg=self.colors['card'],
+            font=("Segoe UI", 16, "normal"),
             justify='center'
         )
-        instructions_label.pack(pady=20)
+        instructions_label.pack(pady=(0, 20))
         
         # Status label
         self.fingerprint_status = tk.Label(
-            center_frame,
+            auth_content,
             text="Initializing sensor...",
-            fg="yellow",
-            bg="darkblue",
-            font=("Helvetica", 14)
+            fg=self.colors['primary'],
+            bg=self.colors['card'],
+            font=("Segoe UI", 14, "bold")
         )
         self.fingerprint_status.pack(pady=10)
         
+        # Buttons frame
+        buttons_frame = tk.Frame(auth_content, bg=self.colors['card'])
+        buttons_frame.pack(pady=(30, 0))
+        
         # Cancel button
         cancel_btn = tk.Button(
-            center_frame,
+            buttons_frame,
             text="← Cancel",
             command=self.show_method_selection,
-            font=("Helvetica", 12, "bold"),
-            bg="red",
-            fg="white",
-            width=15,
-            height=2
+            font=("Segoe UI", 14, "bold"),
+            bg=self.colors['dark'],
+            fg='white',
+            relief='flat',
+            bd=0,
+            padx=30,
+            pady=12,
+            cursor='hand2'
         )
-        cancel_btn.pack(pady=30)
+        cancel_btn.pack()
         
         # Start authentication process
         self.root.after(1000, self.attempt_fingerprint_login)
@@ -656,67 +1045,88 @@ class SecurityGUI:
         self.clear_screen()
         self.current_screen = "deepface"
         
-        # Main container
-        main_frame = tk.Frame(self.root, bg='darkviolet')
+        # Main container with modern background
+        main_frame = tk.Frame(self.root, bg=self.colors['background'])
         main_frame.pack(expand=True, fill='both')
         
-        # Center frame
-        center_frame = tk.Frame(main_frame, bg='darkviolet')
-        center_frame.pack(expand=True)
+        # Header with warning color for AI processing
+        header_frame = tk.Frame(main_frame, bg=self.colors['warning'], height=100)
+        header_frame.pack(fill='x')
+        header_frame.pack_propagate(False)
         
-        # Title
         title_label = tk.Label(
-            center_frame,
+            header_frame,
             text="🧠 ADVANCED FACE RECOGNITION",
-            fg="white",
-            bg="darkviolet",
-            font=("Helvetica", 20, "bold")
+            fg='white',
+            bg=self.colors['warning'],
+            font=("Segoe UI", 20, "bold")
         )
-        title_label.pack(pady=(50, 30))
+        title_label.pack(expand=True)
         
-        # DeepFace icon (animated brain)
+        # Center container - compact design
+        center_container = tk.Frame(main_frame, bg=self.colors['background'])
+        center_container.pack(expand=True, fill='both')
+        
+        # Authentication card - centered with pack
+        auth_frame = tk.Frame(center_container, bg=self.colors['background'])
+        auth_frame.pack(expand=True)
+        
+        auth_card = self.create_modern_card(auth_frame, "AI Face Recognition")
+        auth_card.pack(pady=50, padx=100)
+        
+        auth_content = tk.Frame(auth_card, bg=self.colors['card'])
+        auth_content.pack(padx=50, pady=30)
+        
+        # DeepFace icon
         self.deepface_icon = tk.Label(
-            center_frame,
+            auth_content,
             text="🧠",
-            fg="cyan",
-            bg="darkviolet",
-            font=("Helvetica", 80)
+            fg=self.colors['warning'],
+            bg=self.colors['card'],
+            font=("Segoe UI", 80, "bold")
         )
-        self.deepface_icon.pack(pady=20)
+        self.deepface_icon.pack(pady=(20, 30))
         
         # Instructions
         instructions_label = tk.Label(
-            center_frame,
+            auth_content,
             text="Look directly at the camera\nAdvanced AI processing - please be patient\nEnsure good lighting and clear face visibility",
-            fg="lightgray",
-            bg="darkviolet",
-            font=("Helvetica", 16),
+            fg=self.colors['on_surface'],
+            bg=self.colors['card'],
+            font=("Segoe UI", 16, "normal"),
             justify='center'
         )
-        instructions_label.pack(pady=20)
+        instructions_label.pack(pady=(0, 20))
         
         # Status label
         self.deepface_status = tk.Label(
-            center_frame,
+            auth_content,
             text="Initializing AI models...",
-            fg="yellow",
-            bg="darkviolet",
-            font=("Helvetica", 14)
+            fg=self.colors['warning'],
+            bg=self.colors['card'],
+            font=("Segoe UI", 14, "bold")
         )
         self.deepface_status.pack(pady=10)
         
+        # Buttons frame
+        buttons_frame = tk.Frame(auth_content, bg=self.colors['card'])
+        buttons_frame.pack(pady=(30, 0))
+        
         # Cancel button
         cancel_btn = tk.Button(
-            center_frame,
+            buttons_frame,
             text="← Cancel",
             command=self.show_method_selection,
-            font=("Helvetica", 12, "bold"),
-            bg="red",
-            fg="white",
-            width=15,
-            height=2
+            font=("Segoe UI", 14, "bold"),
+            bg=self.colors['dark'],
+            fg='white',
+            relief='flat',
+            bd=0,
+            padx=30,
+            pady=12,
+            cursor='hand2'
         )
-        cancel_btn.pack(pady=30)
+        cancel_btn.pack()
         
         # Start authentication process
         self.root.after(0, self.attempt_deepface_login)
@@ -755,67 +1165,81 @@ class SecurityGUI:
         self.clear_screen()
         self.current_screen = "password_prompt"
         
-        # Center frame
-        center_frame = tk.Frame(self.root, bg='black')
-        center_frame.pack(expand=True)
+        # Main container with modern background
+        main_frame = tk.Frame(self.root, bg=self.colors['background'])
+        main_frame.pack(expand=True, fill='both')
         
-        # Title
+        # Header with success color (face recognized)
+        header_frame = tk.Frame(main_frame, bg=self.colors['success'], height=100)
+        header_frame.pack(fill='x')
+        header_frame.pack_propagate(False)
+        
         title_label = tk.Label(
-            center_frame,
-            text=f"Face Recognized: {username}",
-            fg="cyan",
-            bg="black",
-            font=("Helvetica", 24, "bold")
+            header_frame,
+            text=f"✅ Face Recognized: {username}",
+            fg='white',
+            bg=self.colors['success'],
+            font=("Segoe UI", 20, "bold")
         )
-        title_label.pack(pady=30)
+        title_label.pack(expand=True)
         
-        # Subtitle
+        # Center container
+        center_container = tk.Frame(main_frame, bg=self.colors['background'])
+        center_container.pack(expand=True, fill='both', padx=150, pady=50)
+        
+        # Password prompt card
+        password_card = self.create_modern_card(center_container, "Domain Authentication Required")
+        password_card.pack(fill='both', expand=True)
+        
+        password_content = tk.Frame(password_card, bg=self.colors['card'])
+        password_content.pack(expand=True, fill='both', padx=40, pady=30)
+        
+        # Instructions
         subtitle_label = tk.Label(
-            center_frame,
-            text="Enter password for domain authentication",
-            fg="white",
-            bg="black",
-            font=("Helvetica", 14)
+            password_content,
+            text="Your face has been recognized successfully.\nPlease enter your domain password to complete authentication.",
+            fg=self.colors['on_surface'],
+            bg=self.colors['card'],
+            font=("Segoe UI", 14, "normal"),
+            justify='center'
         )
-        subtitle_label.pack(pady=10)
+        subtitle_label.pack(pady=(0, 30))
         
-        # Password entry
-        password_frame = tk.Frame(center_frame, bg='black')
-        password_frame.pack(pady=30)
-        
-        password_entry = tk.Entry(
-            password_frame,
-            font=("Helvetica", 16),
-            width=25,
-            show="*",
-            bg="white",
-            fg="black",
-            insertbackground="black"
+        # Password field
+        password_label = tk.Label(
+            password_content,
+            text="Password:",
+            fg=self.colors['on_surface'],
+            bg=self.colors['card'],
+            font=("Segoe UI", 12, "bold")
         )
-        password_entry.pack(pady=10)
-        password_entry.focus()
+        password_label.pack(anchor='w', pady=(0, 5))
+        
+        password_entry = self.create_modern_entry(password_content, show="*", width=30)
+        password_entry.pack(fill='x', pady=(0, 20))
+        password_entry.focus_set()
         
         # Status label
         status_label = tk.Label(
-            center_frame,
+            password_content,
             text="",
-            fg="red",
-            bg="black",
-            font=("Helvetica", 12)
+            fg=self.colors['danger'],
+            bg=self.colors['card'],
+            font=("Segoe UI", 12, "normal")
         )
         status_label.pack(pady=10)
         
         # Buttons frame
-        button_frame = tk.Frame(center_frame, bg='black')
-        button_frame.pack(pady=20)
+        buttons_frame = tk.Frame(password_content, bg=self.colors['card'])
+        buttons_frame.pack(pady=(20, 0))
         
         def authenticate_with_password():
             password = password_entry.get().strip()
             if not password:
-                status_label.config(text="Password cannot be empty")
+                status_label.config(text="Password cannot be empty", fg=self.colors['danger'])
                 return
             
-            status_label.config(text="Authenticating with domain...", fg="yellow")
+            status_label.config(text="Authenticating with domain...", fg=self.colors['primary'])
             
             def ldap_auth_thread():
                 try:
@@ -824,41 +1248,47 @@ class SecurityGUI:
                         role = result.get('role', 'user')
                         self.root.after(0, lambda: self.handle_auth_result(True, username, "face_and_ldap", role))
                     else:
-                        self.root.after(0, lambda: status_label.config(text="Invalid password or domain authentication failed", fg="red"))
+                        self.root.after(0, lambda: status_label.config(text="Invalid password or domain authentication failed", fg=self.colors['danger']))
                 except Exception as e:
                     error_msg = f"Authentication error: {str(e)}"
-                    self.root.after(0, lambda: status_label.config(text=error_msg, fg="red"))
+                    self.root.after(0, lambda: status_label.config(text=error_msg, fg=self.colors['danger']))
             
             threading.Thread(target=ldap_auth_thread, daemon=True).start()
         
         def cancel_auth():
             self.show_method_selection()
         
-        # Login button
-        login_btn = tk.Button(
-            button_frame,
-            text="Authenticate",
+        # Authenticate button
+        auth_btn = tk.Button(
+            buttons_frame,
+            text="✓ Authenticate",
             command=authenticate_with_password,
-            font=("Helvetica", 14, "bold"),
-            bg="green",
-            fg="white",
-            padx=20,
-            pady=10
+            font=("Segoe UI", 14, "bold"),
+            bg=self.colors['success'],
+            fg='white',
+            relief='flat',
+            bd=0,
+            padx=30,
+            pady=12,
+            cursor='hand2'
         )
-        login_btn.pack(side=tk.LEFT, padx=10)
+        auth_btn.pack(side='left', padx=(0, 15))
         
         # Cancel button
         cancel_btn = tk.Button(
-            button_frame,
-            text="Cancel",
+            buttons_frame,
+            text="← Cancel",
             command=cancel_auth,
-            font=("Helvetica", 14),
-            bg="red",
-            fg="white",
-            padx=20,
-            pady=10
+            font=("Segoe UI", 14, "bold"),
+            bg=self.colors['dark'],
+            fg='white',
+            relief='flat',
+            bd=0,
+            padx=30,
+            pady=12,
+            cursor='hand2'
         )
-        cancel_btn.pack(side=tk.LEFT, padx=10)
+        cancel_btn.pack(side='left')
         
         # Bind Enter key to authenticate
         password_entry.bind('<Return>', lambda e: authenticate_with_password())
@@ -868,29 +1298,55 @@ class SecurityGUI:
         self.clear_screen()
         self.current_screen = "loading"
         
-        # Center frame
-        center_frame = tk.Frame(self.root, bg='black')
-        center_frame.pack(expand=True)
+        # Main container with modern background
+        main_frame = tk.Frame(self.root, bg=self.colors['background'])
+        main_frame.pack(expand=True, fill='both')
+        
+        # Header
+        header_frame = tk.Frame(main_frame, bg=self.colors['primary'], height=100)
+        header_frame.pack(fill='x')
+        header_frame.pack_propagate(False)
+        
+        header_title = tk.Label(
+            header_frame,
+            text="🔄 AUTHENTICATING",
+            fg='white',
+            bg=self.colors['primary'],
+            font=("Segoe UI", 20, "bold")
+        )
+        header_title.pack(expand=True)
+        
+        # Center container
+        center_container = tk.Frame(main_frame, bg=self.colors['background'])
+        center_container.pack(expand=True, fill='both', padx=150, pady=100)
+        
+        # Loading card
+        loading_card = self.create_modern_card(center_container, "Please Wait")
+        loading_card.pack(fill='both', expand=True)
+        
+        loading_content = tk.Frame(loading_card, bg=self.colors['card'])
+        loading_content.pack(expand=True, fill='both', padx=40, pady=30)
         
         # Loading spinner
         spinner_label = tk.Label(
-            center_frame,
+            loading_content,
             text="⟳",
-            fg="cyan",
-            bg="black",
-            font=("Helvetica", 60)
+            fg=self.colors['primary'],
+            bg=self.colors['card'],
+            font=("Segoe UI", 60, "bold")
         )
-        spinner_label.pack(pady=50)
+        spinner_label.pack(pady=(20, 30))
         
         # Loading message
         message_label = tk.Label(
-            center_frame,
+            loading_content,
             text=message,
-            fg="white",
-            bg="black",
-            font=("Helvetica", 18)
+            fg=self.colors['on_surface'],
+            bg=self.colors['card'],
+            font=("Segoe UI", 16, "normal"),
+            justify='center'
         )
-        message_label.pack(pady=20)
+        message_label.pack(pady=(0, 20))
     
     def handle_auth_result(self, success, username, method, role_or_error):
         """Handle authentication result."""
@@ -900,78 +1356,124 @@ class SecurityGUI:
             self.show_auth_failure(role_or_error)
     
     def show_auth_success(self, username, role):
-        """Show authentication success screen."""
+        """Show modern authentication success screen."""
         self.is_authenticated = True
         self.current_user = username
         self.current_role = role
         
         SecurityUtils.log_security_event("GUI_AUTH_SUCCESS", f"GUI authentication successful for user: {username}")
         
-        # Show quick success message then go to dashboard
+        # Show modern success screen
         self.clear_screen()
         self.current_screen = "success"
         
-        # Center frame
-        center_frame = tk.Frame(self.root, bg='darkgreen')
+        # Center frame with gradient background
+        center_frame = tk.Frame(self.root, bg=self.colors['success'])
         center_frame.pack(expand=True, fill='both')
         
-        # Success icon
+        # Success content container
+        content_frame = tk.Frame(center_frame, bg=self.colors['success'])
+        content_frame.pack(expand=True)
+        
+        # Modern success icon with animation effect
         success_icon = tk.Label(
-            center_frame,
+            content_frame,
             text="✅",
-            fg="white",
-            bg="darkgreen",
-            font=("Helvetica", 100)
+            fg='white',
+            bg=self.colors['success'],
+            font=("Segoe UI", 80, "bold")
         )
-        success_icon.pack(pady=(100, 30))
+        success_icon.pack(pady=(100, 20))
         
-        # Success message
+        # Success message with modern typography
         success_label = tk.Label(
-            center_frame,
+            content_frame,
             text="AUTHENTICATION SUCCESSFUL",
-            fg="white",
-            bg="darkgreen",
-            font=("Helvetica", 24, "bold")
+            fg='white',
+            bg=self.colors['success'],
+            font=("Segoe UI", 26, "bold")
         )
-        success_label.pack(pady=(0, 20))
+        success_label.pack(pady=(0, 15))
         
-        # User info
+        # User info card
+        info_card = tk.Frame(content_frame, bg='white', relief='flat', bd=0)
+        info_card.pack(pady=20, padx=100, fill='x')
+        
         user_info = tk.Label(
-            center_frame,
+            info_card,
             text=f"Welcome, {username}",
-            fg="lightgray",
-            bg="darkgreen",
-            font=("Helvetica", 16),
-            justify='center'
+            fg=self.colors['on_surface'],
+            bg='white',
+            font=("Segoe UI", 16, "bold")
         )
         user_info.pack(pady=20)
+        
+        if role:
+            role_info = tk.Label(
+                info_card,
+                text=f"Role: {role.upper()}",
+                fg=self.colors['primary'],
+                bg='white',
+                font=("Segoe UI", 12, "normal")
+            )
+            role_info.pack(pady=(0, 20))
+        
+        # Loading message
+        loading_label = tk.Label(
+            content_frame,
+            text="Loading Dashboard...",
+            fg='white',
+            bg=self.colors['success'],
+            font=("Segoe UI", 12, "normal")
+        )
+        loading_label.pack(pady=20)
         
         # Auto-proceed to dashboard after 2 seconds
         self.root.after(2000, self.show_dashboard)
     
     def show_dashboard(self):
-        """Show the main dashboard after successful authentication."""
+        """Show the modern main dashboard after successful authentication."""
         self.clear_screen()
         self.current_screen = "dashboard"
         
         # Main container
-        main_frame = tk.Frame(self.root, bg='darkblue')
+        main_frame = tk.Frame(self.root, bg=self.colors['background'])
         main_frame.pack(expand=True, fill='both')
         
-        # Header
-        header_frame = tk.Frame(main_frame, bg='navy', height=80)
+        # Modern header with gradient effect
+        header_frame = tk.Frame(main_frame, bg=self.colors['primary'], height=100)
         header_frame.pack(fill='x')
         header_frame.pack_propagate(False)
         
-        # Title and user info
+        # Header content
+        header_content = tk.Frame(header_frame, bg=self.colors['primary'])
+        header_content.pack(fill='both', expand=True, padx=30, pady=15)
+        
+        # Title section
+        title_section = tk.Frame(header_content, bg=self.colors['primary'])
+        title_section.pack(side='left', fill='y')
+        
         title_label = tk.Label(
-            header_frame,
-            text="🔒 PHYSICAL SECURITY SYSTEM - DASHBOARD",
-            fg="white",
-            bg="navy",
-            font=("Helvetica", 18, "bold")
+            title_section,
+            text="🔒 PHYSICAL SECURITY SYSTEM",
+            fg='white',
+            bg=self.colors['primary'],
+            font=("Segoe UI", 20, "bold")
         )
-        title_label.pack(side='left', padx=20, pady=20)
+        title_label.pack(anchor='w')
+        
+        subtitle_label = tk.Label(
+            title_section,
+            text="Security Dashboard",
+            fg=self.colors['accent'],
+            bg=self.colors['primary'],
+            font=("Segoe UI", 12, "normal")
+        )
+        subtitle_label.pack(anchor='w')
+        
+        # User info section
+        user_section = tk.Frame(header_content, bg=self.colors['primary'])
+        user_section.pack(side='right', fill='y')
         
         user_info = f"User: {self.current_user}"
         if self.current_role:
@@ -979,181 +1481,571 @@ class SecurityGUI:
         user_info += " | Status: AUTHENTICATED"
         
         user_label = tk.Label(
-            header_frame,
+            user_section,
             text=user_info,
-            fg="lightgreen",
-            bg="navy",
-            font=("Helvetica", 12)
+            fg='white',
+            bg=self.colors['primary'],
+            font=("Segoe UI", 11, "bold")
         )
-        user_label.pack(side='right', padx=20, pady=20)
+        user_label.pack(anchor='e', pady=5)
         
-        # Content area
-        content_frame = tk.Frame(main_frame, bg='darkblue')
-        content_frame.pack(expand=True, fill='both', padx=20, pady=20)
+        # Status indicator
+        status_label = tk.Label(
+            user_section,
+            text="● ONLINE",
+            fg=self.colors['success'],
+            bg=self.colors['primary'],
+            font=("Segoe UI", 10, "bold")
+        )
+        status_label.pack(anchor='e')
+        
+        # Content area with modern cards
+        content_frame = tk.Frame(main_frame, bg=self.colors['background'])
+        content_frame.pack(expand=True, fill='both', padx=30, pady=20)
         
         # Welcome section
-        welcome_frame = tk.Frame(content_frame, bg='darkblue')
-        welcome_frame.pack(fill='x', pady=(0, 30))
+        self.create_welcome_section(content_frame)
+        
+        # Control sections
+        self.create_control_sections(content_frame)
+        
+        # Bottom navigation
+        self.create_bottom_navigation(main_frame)
+        
+    def create_welcome_section(self, parent):
+        """Create modern welcome section."""
+        welcome_card = self.create_modern_card(parent, "System Status")
+        welcome_card.pack(fill='x', pady=(0, 20))
+        
+        welcome_content = tk.Frame(welcome_card, bg=self.colors['card'])
+        welcome_content.pack(fill='x', padx=30, pady=20)
         
         welcome_label = tk.Label(
-            welcome_frame,
-            text=f"Welcome, {self.current_user}!",
-            fg="white",
-            bg="darkblue",
-            font=("Helvetica", 24, "bold")
+            welcome_content,
+            text=f"Welcome back, {self.current_user}!",
+            fg=self.colors['primary'],
+            bg=self.colors['card'],
+            font=("Segoe UI", 22, "bold")
         )
-        welcome_label.pack()
+        welcome_label.pack(anchor='w')
         
-        # Dynamic status based on detection state
+        # Status indicators
+        status_frame = tk.Frame(welcome_content, bg=self.colors['card'])
+        status_frame.pack(fill='x', pady=(10, 0))
+        
+        # Detection status
         detection_status = "🔍 Detection: Inactive (GUI active)" if not self.detection_running else "🔍 Detection: Active"
-        camera_status = "📹 Camera: Available for Face Registration" if not self.detection_running else "📹 Camera: In use by Detection"
-        
-        status_label = tk.Label(
-            welcome_frame,
-            text=f"✅ Authentication Complete\n{detection_status}\n{camera_status}\n💡 Minimize window to start detection\n⌨️  Press Ctrl+Shift+R to restore from tray",
-            fg="lightgray",
-            bg="darkblue",
-            font=("Helvetica", 14),
-            justify='center'
+        detection_label = tk.Label(
+            status_frame,
+            text=detection_status,
+            fg=self.colors['on_surface'],
+            bg=self.colors['card'],
+            font=("Segoe UI", 11, "normal")
         )
-        status_label.pack(pady=10)
+        detection_label.pack(anchor='w', pady=2)
         
-        # Control buttons section
-        controls_frame = tk.Frame(content_frame, bg='darkblue')
-        controls_frame.pack(fill='both', pady=(0, 10))
+        # Camera status
+        camera_status = "📹 Camera: Available for Registration" if not self.detection_running else "📹 Camera: In use by Detection"
+        camera_label = tk.Label(
+            status_frame,
+            text=camera_status,
+            fg=self.colors['on_surface'],
+            bg=self.colors['card'],
+            font=("Segoe UI", 11, "normal")
+        )
+        camera_label.pack(anchor='w', pady=2)
+        
+        # Instructions
+        instructions = "💡 Minimize window to start detection | ⌨️ Press Ctrl+Shift+R to restore from tray"
+        instructions_label = tk.Label(
+            status_frame,
+            text=instructions,
+            fg=self.colors['accent'],
+            bg=self.colors['card'],
+            font=("Segoe UI", 10, "italic")
+        )
+        instructions_label.pack(anchor='w', pady=(10, 0))
+    
+    def create_control_sections(self, parent):
+        """Create modern control sections."""
+        # Controls container
+        controls_container = tk.Frame(parent, bg=self.colors['background'])
+        controls_container.pack(fill='both', expand=True)
         
         # Admin controls (only show for admin users)
         if self.current_role and self.current_role.lower() in ['admin', 'administrator']:
-            admin_frame = tk.LabelFrame(controls_frame, text="Administrator Controls", 
-                                       font=("Helvetica", 14, "bold"), fg="gold", bg="darkblue")
-            admin_frame.pack(pady=10, padx=20)
+            admin_card = self.create_modern_card(controls_container, "Administrator Controls")
+            admin_card.pack(fill='x', pady=(0, 15))
+            
+            admin_content = tk.Frame(admin_card, bg=self.colors['card'])
+            admin_content.pack(fill='x', padx=30, pady=20)
+            
+            admin_buttons = tk.Frame(admin_content, bg=self.colors['card'])
+            admin_buttons.pack()
             
             # User Management button
             user_mgmt_btn = tk.Button(
-                admin_frame,
+                admin_buttons,
                 text="👥 User Management",
                 command=self.show_user_management,
-                font=("Helvetica", 14, "bold"),
-                bg="gold",
-                fg="black",
-                width=20,
-                height=2,
-                relief="raised",
-                bd=3
+                font=("Segoe UI", 12, "bold"),
+                bg=self.colors['warning'],
+                fg='white',
+                relief='flat',
+                bd=0,
+                padx=25,
+                pady=12,
+                cursor='hand2'
             )
-            user_mgmt_btn.pack(pady=10, padx=10, side='left')
-
+            user_mgmt_btn.pack(side='left', padx=(0, 15))
+            
             # View Logs button
             logs_btn = tk.Button(
-                admin_frame,
-                text="📋 View Security Logs",
+                admin_buttons,
+                text="📋 Security Logs",
                 command=self.show_security_logs,
-                font=("Helvetica", 14, "bold"),
-                bg="blue",
-                fg="white",
-                width=20,
-                height=2,
-                relief="raised",
-                bd=3
+                font=("Segoe UI", 12, "bold"),
+                bg=self.colors['primary'],
+                fg='white',
+                relief='flat',
+                bd=0,
+                padx=25,
+                pady=12,
+                cursor='hand2'
             )
-            logs_btn.pack(pady=10, padx=10, side='left')
+            logs_btn.pack(side='left')
         
         # Common controls
-        common_frame = tk.LabelFrame(controls_frame, text="System Controls", 
-                                   font=("Helvetica", 14, "bold"), fg="lightblue", bg="darkblue")
-        common_frame.pack(pady=10, padx=20, fill='x')
-
-        # Bottom controls
-        bottom_frame = tk.Frame(content_frame, bg='darkblue')
-        bottom_frame.pack(side='bottom', fill='x', pady=10)
-
-        # Logout button
-        logout_btn = tk.Button(
-            bottom_frame,
-            text="🚪 Logout",
-            command=self.logout,
-            font=("Helvetica", 12, "bold"),
-            bg="red",
-            fg="white",
-            width=15,
-            height=2
+        # common_card = self.create_modern_card(controls_container, "System Controls")
+        # common_card.pack(fill='x', pady=(0, 15))
+        
+        # Add system control buttons here as needed
+        
+    def create_bottom_navigation(self, parent):
+        """Create modern bottom navigation."""
+        bottom_frame = tk.Frame(parent, bg=self.colors['dark'], height=80)
+        bottom_frame.pack(fill='x', side='bottom')
+        bottom_frame.pack_propagate(False)
+        
+        nav_content = tk.Frame(bottom_frame, bg=self.colors['dark'])
+        nav_content.pack(fill='both', expand=True, padx=30, pady=15)
+        
+        # System info (left side)
+        info_label = tk.Label(
+            nav_content,
+            text="Physical Security System v2.0 | Status: Active",
+            fg='white',
+            bg=self.colors['dark'],
+            font=("Segoe UI", 10, "normal")
         )
-        logout_btn.pack(side='right', padx=10)
-
-        # Minimize to tray button (right beside logout)
+        info_label.pack(side='left', anchor='w')
+        
+        # Action buttons (right side)
+        buttons_frame = tk.Frame(nav_content, bg=self.colors['dark'])
+        buttons_frame.pack(side='right')
+        
+        # Minimize button
         minimize_btn = tk.Button(
-            bottom_frame,
+            buttons_frame,
             text="⬇ Minimize & Start Detection",
             command=self.minimize_to_system_tray,
-            font=("Helvetica", 12, "bold"),
-            bg="darkgreen",
-            fg="white",
-            width=25,
-            height=2
+            font=("Segoe UI", 10, "bold"),
+            bg=self.colors['success'],
+            fg='white',
+            relief='flat',
+            bd=0,
+            padx=20,
+            pady=8,
+            cursor='hand2'
         )
-        minimize_btn.pack(side='right', padx=10)
+        minimize_btn.pack(side='right', padx=(15, 0))
         
-        # System info
-        info_label = tk.Label(
-            bottom_frame,
-            text="Physical Security System v2.0 | Status: Active",
-            fg="lightgray",
-            bg="darkblue",
-            font=("Helvetica", 10)
+        # Logout button
+        logout_btn = tk.Button(
+            buttons_frame,
+            text="🚪 Logout",
+            command=self.logout,
+            font=("Segoe UI", 10, "bold"),
+            bg=self.colors['danger'],
+            fg='white',
+            relief='flat',
+            bd=0,
+            padx=20,
+            pady=8,
+            cursor='hand2'
         )
-        info_label.pack(side='left', padx=20)
+        logout_btn.pack(side='right')
     
     def show_user_management(self):
-        """Show the comprehensive user management interface within the GUI."""
+        """Show the modern comprehensive user management interface within the GUI."""
         self.clear_screen()
         self.current_screen = "user_management"
         
-        # Main container
-        main_frame = tk.Frame(self.root, bg='darkblue')
+        # Main container with modern background
+        main_frame = tk.Frame(self.root, bg=self.colors['background'])
         main_frame.pack(expand=True, fill='both')
         
-        # Header
-        header_frame = tk.Frame(main_frame, bg='navy', height=80)
+        # Modern header
+        header_frame = tk.Frame(main_frame, bg=self.colors['primary'], height=90)
         header_frame.pack(fill='x')
         header_frame.pack_propagate(False)
         
-        # Title and back button
-        title_label = tk.Label(
-            header_frame,
-            text="👥 USER MANAGEMENT",
-            fg="white",
-            bg="navy",
-            font=("Helvetica", 18, "bold")
-        )
-        title_label.pack(side='left', padx=20, pady=20)
+        header_content = tk.Frame(header_frame, bg=self.colors['primary'])
+        header_content.pack(fill='both', expand=True, padx=30, pady=15)
         
+        # Title section
+        title_label = tk.Label(
+            header_content,
+            text="👥 USER MANAGEMENT",
+            fg='white',
+            bg=self.colors['primary'],
+            font=("Segoe UI", 20, "bold")
+        )
+        title_label.pack(side='left', anchor='w')
+        
+        # Back button
         back_btn = tk.Button(
-            header_frame,
+            header_content,
             text="← Back to Dashboard",
             command=self.show_dashboard,
-            font=("Helvetica", 12, "bold"),
-            bg="gray",
-            fg="white",
-            width=20,
-            height=2
+            font=("Segoe UI", 12, "bold"),
+            bg='white',
+            fg=self.colors['primary'],
+            relief='flat',
+            bd=0,
+            padx=20,
+            pady=8,
+            cursor='hand2'
         )
-        back_btn.pack(side='right', padx=20, pady=15)
+        back_btn.pack(side='right', anchor='e')
         
         # Main content container
-        content_container = tk.Frame(main_frame, bg='darkblue')
-        content_container.pack(expand=True, fill='both', padx=10, pady=10)
+        content_container = tk.Frame(main_frame, bg=self.colors['background'])
+        content_container.pack(expand=True, fill='both', padx=20, pady=20)
         
-        # Left panel for user input and actions
-        left_panel = tk.Frame(content_container, bg='darkblue', width=500)
-        left_panel.pack(side='left', fill='both', expand=False, padx=(0,10))
-        left_panel.pack_propagate(False)
+        # Left panel container with scrollbar
+        left_container = tk.Frame(content_container, bg=self.colors['background'], width=470)
+        left_container.pack(side='left', fill='y', expand=False, padx=(0, 15))
+        left_container.pack_propagate(False)
+        
+        # Create scrollable left panel
+        left_canvas = tk.Canvas(left_container, bg=self.colors['background'], 
+                               highlightthickness=0, width=450)
+        left_scrollbar = ttk.Scrollbar(left_container, orient="vertical", command=left_canvas.yview)
+        left_panel = tk.Frame(left_canvas, bg=self.colors['background'], width=430)
+        
+        def configure_scroll_region(event=None):
+            left_canvas.configure(scrollregion=left_canvas.bbox("all"))
+            # Make sure the inner frame fills the canvas width
+            canvas_width = left_canvas.winfo_width()
+            if canvas_width > 1:  # Only if canvas is actually visible
+                left_canvas.itemconfig(canvas_window, width=canvas_width-20)
+        
+        left_panel.bind("<Configure>", configure_scroll_region)
+        left_canvas.bind("<Configure>", configure_scroll_region)
+        
+        canvas_window = left_canvas.create_window((0, 0), window=left_panel, anchor="nw")
+        left_canvas.configure(yscrollcommand=left_scrollbar.set)
+        
+        left_canvas.pack(side="left", fill="both", expand=True, padx=(0, 5))
+        left_scrollbar.pack(side="right", fill="y")
+        
+        # Enhanced mousewheel binding for better scrolling
+        def _on_mousewheel(event):
+            if left_canvas.winfo_exists():
+                left_canvas.yview_scroll(int(-1*(event.delta/120)), "units")
+        
+        def bind_mousewheel(widget):
+            widget.bind("<MouseWheel>", _on_mousewheel)
+            for child in widget.winfo_children():
+                bind_mousewheel(child)
+        
+        # Bind mousewheel to canvas and all its children
+        bind_mousewheel(left_canvas)
+        
+        # Also bind to the left panel and its children after they're created
+        def bind_left_panel_mousewheel():
+            bind_mousewheel(left_panel)
+        
+        # Schedule binding after the panel is populated
+        left_container.after(100, bind_left_panel_mousewheel)
         
         # Right panel for output and user list
-        right_panel = tk.Frame(content_container, bg='darkblue')
+        right_panel = tk.Frame(content_container, bg=self.colors['background'])
         right_panel.pack(side='right', fill='both', expand=True)
         
-        self.setup_user_mgmt_left_panel(left_panel)
-        self.setup_user_mgmt_right_panel(right_panel)
+        self.setup_modern_user_mgmt_left_panel(left_panel)
+        self.setup_modern_user_mgmt_right_panel(right_panel)
+    
+    def setup_modern_user_mgmt_left_panel(self, parent):
+        """Setup the modern left panel with user input and action buttons."""
+        
+        # Add padding container to ensure content doesn't touch edges
+        padding_frame = tk.Frame(parent, bg=self.colors['background'])
+        padding_frame.pack(fill='both', expand=True, padx=5, pady=5)
+        
+        # User Information Card
+        info_card = self.create_modern_card(padding_frame, "User Information")
+        info_card.pack(fill='x', pady=(0, 15))
+        
+        info_content = tk.Frame(info_card, bg=self.colors['card'])
+        info_content.pack(fill='x', padx=25, pady=20)
+        
+        # Modern form fields with better styling
+        # Username
+        tk.Label(info_content, text="Username:", 
+                fg=self.colors['on_surface'], bg=self.colors['card'], 
+                font=("Segoe UI", 10, "bold")).grid(row=0, column=0, sticky='w', pady=(0, 5))
+        username_entry = self.create_modern_entry(info_content, textvariable=self.username_var)
+        username_entry.grid(row=1, column=0, sticky='ew', pady=(0, 15))
+        
+        # First Name
+        tk.Label(info_content, text="First Name:", 
+                fg=self.colors['on_surface'], bg=self.colors['card'], 
+                font=("Segoe UI", 10, "bold")).grid(row=2, column=0, sticky='w', pady=(0, 5))
+        self.create_modern_entry(info_content, textvariable=self.first_name_var).grid(row=3, column=0, sticky='ew', pady=(0, 15))
+        
+        # Last Name
+        tk.Label(info_content, text="Last Name:", 
+                fg=self.colors['on_surface'], bg=self.colors['card'], 
+                font=("Segoe UI", 10, "bold")).grid(row=4, column=0, sticky='w', pady=(0, 5))
+        self.create_modern_entry(info_content, textvariable=self.last_name_var).grid(row=5, column=0, sticky='ew', pady=(0, 15))
+        
+        # Email
+        tk.Label(info_content, text="Email:", 
+                fg=self.colors['on_surface'], bg=self.colors['card'], 
+                font=("Segoe UI", 10, "bold")).grid(row=6, column=0, sticky='w', pady=(0, 5))
+        self.create_modern_entry(info_content, textvariable=self.email_var).grid(row=7, column=0, sticky='ew', pady=(0, 15))
+        
+        # Role selection with modern radio buttons
+        tk.Label(info_content, text="Role:", 
+                fg=self.colors['on_surface'], bg=self.colors['card'], 
+                font=("Segoe UI", 10, "bold")).grid(row=8, column=0, sticky='w', pady=(0, 5))
+        
+        role_frame = tk.Frame(info_content, bg=self.colors['card'])
+        role_frame.grid(row=9, column=0, sticky='ew', pady=(0, 10))
+        
+        roles = [("User", "user"), ("Operator", "operator"), ("Admin", "admin")]
+        for i, (text, value) in enumerate(roles):
+            tk.Radiobutton(role_frame, text=text, variable=self.role_var, value=value,
+                          fg=self.colors['on_surface'], bg=self.colors['card'], 
+                          selectcolor=self.colors['accent'], 
+                          font=("Segoe UI", 9)).pack(side='left', padx=10)
+        
+        # OU Information
+        ou_info = tk.Label(info_content, 
+                          text="📁 Users will be created in SecuritySystem OU", 
+                          fg=self.colors['accent'], bg=self.colors['card'], 
+                          font=("Segoe UI", 8, "italic"))
+        ou_info.grid(row=10, column=0, sticky='w', pady=(0, 15))
+        
+        # Configure grid weights
+        info_content.grid_columnconfigure(0, weight=1)
+        
+        # Clear button
+        clear_btn = tk.Button(info_content, text="Clear Form", command=self.clear_user_form,
+                             bg=self.colors['dark'], fg='white', 
+                             font=("Segoe UI", 9, "bold"), relief='flat', bd=0, padx=15, pady=5)
+        clear_btn.grid(row=11, column=0, sticky='e', pady=(0, 0))
+        
+        # Image Selection Card
+        image_card = self.create_modern_card(padding_frame, "Face Image (Optional)")
+        image_card.pack(fill='x', pady=(0, 15))
+        
+        image_content = tk.Frame(image_card, bg=self.colors['card'])
+        image_content.pack(fill='x', padx=25, pady=15)
+        
+        self.image_label = tk.Label(image_content, text="No image selected", 
+                                   fg=self.colors['on_surface'], bg=self.colors['card'], 
+                                   font=("Segoe UI", 9, "italic"))
+        self.image_label.pack(pady=(0, 10))
+        
+        select_img_btn = tk.Button(image_content, text="📁 Select Image File", 
+                                  command=self.select_image_file,
+                                  bg=self.colors['primary'], fg='white', 
+                                  font=("Segoe UI", 10, "bold"), relief='flat', bd=0, 
+                                  padx=15, pady=8)
+        select_img_btn.pack()
+        
+        # Registration Actions Card
+        reg_card = self.create_modern_card(padding_frame, "User Registration")
+        reg_card.pack(fill='x', pady=(0, 15))
+        
+        reg_content = tk.Frame(reg_card, bg=self.colors['card'])
+        reg_content.pack(fill='x', padx=25, pady=15)
+        
+        # Modern action buttons
+        tk.Button(reg_content, text="📷 Register User + Face (Camera)", 
+                 command=self.register_user_camera_unified,
+                 bg=self.colors['success'], fg='white', 
+                 font=("Segoe UI", 10, "bold"), relief='flat', bd=0, 
+                 padx=15, pady=8).pack(fill='x', pady=3)
+        
+        tk.Button(reg_content, text="🖼️ Register User + Face (Image)", 
+                 command=self.register_user_image_unified,
+                 bg=self.colors['primary'], fg='white', 
+                 font=("Segoe UI", 10, "bold"), relief='flat', bd=0, 
+                 padx=15, pady=8).pack(fill='x', pady=3)
+        
+        tk.Button(reg_content, text="👤 Create LDAP User Only", 
+                 command=self.create_ldap_user_only_unified,
+                 bg=self.colors['warning'], fg='white', 
+                 font=("Segoe UI", 10, "bold"), relief='flat', bd=0, 
+                 padx=15, pady=8).pack(fill='x', pady=3)
+        
+        # Authentication Testing Card
+        test_card = self.create_modern_card(padding_frame, "Authentication Testing")
+        test_card.pack(fill='x', pady=(0, 15))
+        
+        test_content = tk.Frame(test_card, bg=self.colors['card'])
+        test_content.pack(fill='x', padx=25, pady=15)
+        
+        # Test buttons
+        test_buttons_frame = tk.Frame(test_content, bg=self.colors['card'])
+        test_buttons_frame.pack(fill='x', pady=(0, 10))
+        
+        tk.Button(test_buttons_frame, text="🧠 Test DeepFace", 
+                 command=self.test_deepface_auth_unified,
+                 bg=self.colors['warning'], fg='white', 
+                 font=("Segoe UI", 9, "bold"), relief='flat', bd=0, 
+                 padx=10, pady=6).pack(side='left', padx=(0, 5))
+        
+        tk.Button(test_buttons_frame, text="👆 Test Fingerprint", 
+                 command=self.test_fingerprint_auth_unified,
+                 bg=self.colors['danger'], fg='white', 
+                 font=("Segoe UI", 9, "bold"), relief='flat', bd=0, 
+                 padx=10, pady=6).pack(side='left')
+        
+        # LDAP test section
+        ldap_frame = tk.Frame(test_content, bg=self.colors['card'])
+        ldap_frame.pack(fill='x', pady=(10, 0))
+        
+        # LDAP section title
+        ldap_title = tk.Label(ldap_frame, text="LDAP Authentication Test:", 
+                             fg=self.colors['on_surface'], bg=self.colors['card'], 
+                             font=("Segoe UI", 9, "bold"))
+        ldap_title.pack(anchor='w', pady=(0, 5))
+        
+        # LDAP credentials in grid layout for better organization
+        cred_container = tk.Frame(ldap_frame, bg=self.colors['card'])
+        cred_container.pack(fill='x')
+        
+        # Username row
+        username_row = tk.Frame(cred_container, bg=self.colors['card'])
+        username_row.pack(fill='x', pady=(0, 5))
+        
+        tk.Label(username_row, text="Username:", fg=self.colors['on_surface'], 
+                bg=self.colors['card'], font=("Segoe UI", 8)).pack(side='left')
+        username_entry = self.create_modern_entry(username_row, textvariable=self.ldap_user_var, width=20)
+        username_entry.pack(side='left', padx=(5, 0), fill='x', expand=True)
+        
+        # Password row
+        password_row = tk.Frame(cred_container, bg=self.colors['card'])
+        password_row.pack(fill='x', pady=(0, 8))
+        
+        tk.Label(password_row, text="Password:", fg=self.colors['on_surface'], 
+                bg=self.colors['card'], font=("Segoe UI", 8)).pack(side='left')
+        password_entry = self.create_modern_entry(password_row, textvariable=self.ldap_pass_var, 
+                                                 show='*', width=20)
+        password_entry.pack(side='left', padx=(5, 0), fill='x', expand=True)
+        
+        # Test button row
+        button_row = tk.Frame(cred_container, bg=self.colors['card'])
+        button_row.pack(fill='x')
+        
+        tk.Button(button_row, text="Login", 
+                 command=self.test_ldap_auth_unified,
+                 bg=self.colors['primary'], fg='white', 
+                 font=("Segoe UI", 9, "bold"), relief='flat', bd=0, 
+                 padx=15, pady=6).pack(anchor='w')
+        
+        # User Management Actions Card
+        mgmt_card = self.create_modern_card(padding_frame, "User Management")
+        mgmt_card.pack(fill='x', pady=(0, 20))  # Add bottom padding
+        
+        mgmt_content = tk.Frame(mgmt_card, bg=self.colors['card'])
+        mgmt_content.pack(fill='x', padx=25, pady=15)
+        
+        mgmt_buttons_frame = tk.Frame(mgmt_content, bg=self.colors['card'])
+        mgmt_buttons_frame.pack()
+        
+        tk.Button(mgmt_buttons_frame, text="Refresh List", 
+                 command=self.refresh_user_list_unified,
+                 bg=self.colors['success'], fg='white', 
+                 font=("Segoe UI", 9, "bold"), relief='flat', bd=0, 
+                 padx=12, pady=6).pack(side='left', padx=(0, 10))
+        
+        tk.Button(mgmt_buttons_frame, text="Delete Selected", 
+                 command=self.delete_selected_user_unified,
+                 bg=self.colors['danger'], fg='white', 
+                 font=("Segoe UI", 9, "bold"), relief='flat', bd=0, 
+                 padx=12, pady=6).pack(side='left')
+    
+    def setup_modern_user_mgmt_right_panel(self, parent):
+        """Setup the modern right panel with output and user list."""
+        
+        # User List Card
+        users_card = self.create_modern_card(parent, "Registered Users")
+        users_card.pack(fill='both', expand=True, pady=(0, 15))
+        
+        list_content = tk.Frame(users_card, bg=self.colors['card'])
+        list_content.pack(fill='both', expand=True, padx=20, pady=15)
+        
+        # Modern Treeview for user list
+        columns = ('System', 'Username', 'Name', 'Role', 'Email', 'Created')
+        self.user_tree = ttk.Treeview(list_content, columns=columns, show='headings', 
+                                     height=12, style='Modern.Treeview')
+        
+        # Configure columns with modern styling
+        self.user_tree.heading('System', text='System')
+        self.user_tree.heading('Username', text='Username')
+        self.user_tree.heading('Name', text='Full Name')
+        self.user_tree.heading('Role', text='Role')
+        self.user_tree.heading('Email', text='Email')
+        self.user_tree.heading('Created', text='Created')
+        
+        self.user_tree.column('System', width=80)
+        self.user_tree.column('Username', width=100)
+        self.user_tree.column('Name', width=150)
+        self.user_tree.column('Role', width=80)
+        self.user_tree.column('Email', width=150)
+        self.user_tree.column('Created', width=120)
+        
+        # Modern scrollbars
+        v_scrollbar = ttk.Scrollbar(list_content, orient='vertical', command=self.user_tree.yview)
+        h_scrollbar = ttk.Scrollbar(list_content, orient='horizontal', command=self.user_tree.xview)
+        self.user_tree.configure(yscrollcommand=v_scrollbar.set, xscrollcommand=h_scrollbar.set)
+        
+        # Grid layout for better scrollbar placement
+        self.user_tree.grid(row=0, column=0, sticky='nsew')
+        v_scrollbar.grid(row=0, column=1, sticky='ns')
+        h_scrollbar.grid(row=1, column=0, sticky='ew')
+        
+        list_content.grid_rowconfigure(0, weight=1)
+        list_content.grid_columnconfigure(0, weight=1)
+        
+        # System Output Card
+        output_card = self.create_modern_card(parent, "System Output")
+        output_card.pack(fill='both', expand=True)
+        
+        output_content = tk.Frame(output_card, bg=self.colors['card'])
+        output_content.pack(fill='both', expand=True, padx=20, pady=15)
+        
+        # Modern output text area
+        self.user_mgmt_output = tk.Text(output_content, height=12, 
+                                       font=("Consolas", 9), 
+                                       bg='#1e1e1e', fg='#ffffff',
+                                       insertbackground='white',
+                                       relief='flat', bd=0)
+        output_scrollbar = ttk.Scrollbar(output_content, command=self.user_mgmt_output.yview)
+        self.user_mgmt_output.configure(yscrollcommand=output_scrollbar.set)
+        
+        self.user_mgmt_output.pack(side='left', fill='both', expand=True)
+        output_scrollbar.pack(side='right', fill='y')
+        
+        # Load initial data
+        self.refresh_user_list_unified()
+        self.log_user_mgmt_message("🚀 Modern User Management System initialized", "success")
     
     def setup_user_mgmt_left_panel(self, parent):
         """Setup the left panel with user input and action buttons."""
@@ -1193,8 +2085,6 @@ class SecurityGUI:
         # Add informational text about OU placement
         ou_info_frame = tk.Frame(info_frame, bg="darkblue")
         ou_info_frame.grid(row=4, column=2, sticky='w', padx=5, pady=3)
-        tk.Label(ou_info_frame, text="Users will be created in SecuritySystem OU", 
-                fg="lightgray", bg="darkblue", font=("Helvetica", 8)).pack()
         
         # Clear button
         tk.Button(info_frame, text="Clear Form", command=self.clear_user_form,
@@ -1225,7 +2115,7 @@ class SecurityGUI:
                  command=self.register_user_image_unified,
                  bg='darkblue', fg='white', font=("Helvetica", 10), width=30).pack(pady=3)
         
-        tk.Button(reg_frame, text="Create LDAP User Only", 
+        tk.Button(reg_frame, text="Register LDAP User Only", 
                  command=self.create_ldap_user_only_unified,
                  bg='purple', fg='white', font=("Helvetica", 10), width=30).pack(pady=3)
         
@@ -1249,13 +2139,13 @@ class SecurityGUI:
         ldap_test_frame = tk.Frame(test_frame, bg="darkblue")
         ldap_test_frame.pack(pady=3)
         
-        tk.Label(ldap_test_frame, text="LDAP Test - Username:", fg="white", bg="darkblue", font=("Helvetica", 9)).pack(side='left')
+        tk.Label(ldap_test_frame, text="Username:", fg="white", bg="darkblue", font=("Helvetica", 9)).pack(side='left')
         tk.Entry(ldap_test_frame, textvariable=self.ldap_user_var, width=15, font=("Helvetica", 9)).pack(side='left', padx=3)
         
         tk.Label(ldap_test_frame, text="Password:", fg="white", bg="darkblue", font=("Helvetica", 9)).pack(side='left', padx=(10,0))
         tk.Entry(ldap_test_frame, textvariable=self.ldap_pass_var, width=15, show='*', font=("Helvetica", 9)).pack(side='left', padx=3)
         
-        tk.Button(ldap_test_frame, text="Test LDAP", 
+        tk.Button(ldap_test_frame, text="Login", 
                  command=self.test_ldap_auth_unified,
                  bg='orange', fg='white', font=("Helvetica", 9)).pack(side='left', padx=5)
         
@@ -1273,7 +2163,7 @@ class SecurityGUI:
         
         tk.Button(mgmt_buttons_frame, text="Delete Selected User", 
                  command=self.delete_selected_user_unified,
-                 bg='darkred', fg='white', font=("Helvetica", 9), width=15).pack(side='left', padx=2)
+                 bg='darkred', fg='white', font=("Helvetica", 9), width=20).pack(side='left', padx=2)
         
         # System Information
         sys_frame = tk.LabelFrame(parent, text="System Information", 
@@ -1375,6 +2265,53 @@ class SecurityGUI:
             'role': self.role_var.get()
         }
     
+    def create_modern_card(self, parent, title=None):
+        """Create a modern card-style container with title."""
+        card = tk.Frame(parent, bg=self.colors['card'], relief='flat', bd=0)
+        
+        # Title bar (only if title provided)
+        if title:
+            title_frame = tk.Frame(card, bg=self.colors['primary'], height=35)
+            title_frame.pack(fill='x')
+            title_frame.pack_propagate(False)
+            
+            title_label = tk.Label(title_frame, text=title, 
+                                  bg=self.colors['primary'], fg='white',
+                                  font=("Segoe UI", 11, "bold"))
+            title_label.pack(pady=8)
+        
+        return card
+    
+    def log_user_mgmt_message(self, message, type="info"):
+        """Log a message to the user management output with modern styling."""
+        if not hasattr(self, 'user_mgmt_output'):
+            return
+            
+        timestamp = datetime.now().strftime("%H:%M:%S")
+        
+        # Color coding for different message types
+        colors = {
+            "info": "#61DAFB",      # Light blue
+            "success": "#4CAF50",   # Green
+            "warning": "#FF9800",   # Orange
+            "error": "#F44336",     # Red
+            "system": "#9C27B0"     # Purple
+        }
+        
+        color = colors.get(type, colors["info"])
+        
+        # Insert colored message
+        self.user_mgmt_output.insert(tk.END, f"[{timestamp}] ", "timestamp")
+        self.user_mgmt_output.insert(tk.END, f"{message}\n", type)
+        
+        # Configure tags for coloring
+        self.user_mgmt_output.tag_config("timestamp", foreground="#888888")
+        self.user_mgmt_output.tag_config(type, foreground=color)
+        
+        # Auto-scroll to bottom
+        self.user_mgmt_output.see(tk.END)
+        self.user_mgmt_output.update()
+
     def clear_user_form(self):
         """Clear all form fields."""
         self.username_var.set("")
@@ -1798,110 +2735,132 @@ class SecurityGUI:
             self.log_user_mgmt_output("📹 Detection system inactive - GUI mode active")
     
     def show_security_logs(self):
-        """Show the security logs interface within the GUI."""
+        """Show the modern security logs interface within the GUI."""
         self.clear_screen()
         self.current_screen = "security_logs"
         
-        # Main container
-        main_frame = tk.Frame(self.root, bg='darkblue')
+        # Main container with modern background
+        main_frame = tk.Frame(self.root, bg=self.colors['background'])
         main_frame.pack(expand=True, fill='both')
         
-        # Header
-        header_frame = tk.Frame(main_frame, bg='navy', height=80)
+        # Modern header
+        header_frame = tk.Frame(main_frame, bg=self.colors['primary'], height=90)
         header_frame.pack(fill='x')
         header_frame.pack_propagate(False)
         
-        # Title and back button
-        title_label = tk.Label(
-            header_frame,
-            text="📋 SECURITY LOGS",
-            fg="white",
-            bg="navy",
-            font=("Helvetica", 18, "bold")
-        )
-        title_label.pack(side='left', padx=20, pady=20)
+        header_content = tk.Frame(header_frame, bg=self.colors['primary'])
+        header_content.pack(fill='both', expand=True, padx=30, pady=15)
         
+        # Title section
+        title_label = tk.Label(
+            header_content,
+            text="📋 SECURITY LOGS",
+            fg='white',
+            bg=self.colors['primary'],
+            font=("Segoe UI", 20, "bold")
+        )
+        title_label.pack(side='left', anchor='w')
+        
+        # Back button
         back_btn = tk.Button(
-            header_frame,
+            header_content,
             text="← Back to Dashboard",
             command=self.show_dashboard,
-            font=("Helvetica", 12, "bold"),
-            bg="gray",
-            fg="white",
-            width=20,
-            height=2
+            font=("Segoe UI", 12, "bold"),
+            bg='white',
+            fg=self.colors['primary'],
+            relief='flat',
+            bd=0,
+            padx=20,
+            pady=8,
+            cursor='hand2'
         )
-        back_btn.pack(side='right', padx=20, pady=15)
+        back_btn.pack(side='right', anchor='e')
         
-        # Content area
-        content_frame = tk.Frame(main_frame, bg='darkblue')
-        content_frame.pack(expand=True, fill='both', padx=20, pady=20)
+        # Content container
+        content_container = tk.Frame(main_frame, bg=self.colors['background'])
+        content_container.pack(expand=True, fill='both', padx=20, pady=20)
         
-        # Controls section
-        controls_frame = tk.Frame(content_frame, bg='darkblue')
-        controls_frame.pack(fill='x', pady=(0, 10))
+        # Controls Card
+        controls_card = self.create_modern_card(content_container, "Log Controls")
+        controls_card.pack(fill='x', pady=(0, 20))
         
+        controls_content = tk.Frame(controls_card, bg=self.colors['card'])
+        controls_content.pack(fill='x', padx=25, pady=15)
+        
+        controls_frame = tk.Frame(controls_content, bg=self.colors['card'])
+        controls_frame.pack()
+        
+        # Modern control buttons
         tk.Button(
             controls_frame,
-            text="🔄 Refresh Logs",
+            text="Refresh Logs",
             command=self.refresh_security_logs,
-            font=("Helvetica", 11, "bold"),
-            bg="green",
-            fg="white",
-            width=15,
-            height=2
-        ).pack(side='left', padx=10)
+            font=("Segoe UI", 11, "bold"),
+            bg=self.colors['success'],
+            fg='white',
+            relief='flat',
+            bd=0,
+            padx=20,
+            pady=10,
+            cursor='hand2'
+        ).pack(side='left', padx=(0, 15))
         
         tk.Button(
             controls_frame,
-            text="📅 Today's Logs",
+            text="Today's Logs",
             command=lambda: self.filter_logs_by_date("today"),
-            font=("Helvetica", 11, "bold"),
-            bg="blue",
-            fg="white",
-            width=15,
-            height=2
-        ).pack(side='left', padx=10)
+            font=("Segoe UI", 11, "bold"),
+            bg=self.colors['primary'],
+            fg='white',
+            relief='flat',
+            bd=0,
+            padx=20,
+            pady=10,
+            cursor='hand2'
+        ).pack(side='left', padx=(0, 15))
         
         tk.Button(
             controls_frame,
-            text="🗂️ All Logs",
+            text="All Logs",
             command=lambda: self.filter_logs_by_date("all"),
-            font=("Helvetica", 11, "bold"),
-            bg="purple",
-            fg="white",
-            width=15,
-            height=2
-        ).pack(side='left', padx=10)
+            font=("Segoe UI", 11, "bold"),
+            bg=self.colors['warning'],
+            fg='white',
+            relief='flat',
+            bd=0,
+            padx=20,
+            pady=10,
+            cursor='hand2'
+        ).pack(side='left')
         
-        # Log display area
-        log_frame = tk.LabelFrame(content_frame, text="Security Log Entries", 
-                                 font=("Helvetica", 12, "bold"), fg="white", bg="darkblue")
-        log_frame.pack(fill='both', expand=True)
+        # Log Display Card
+        log_card = self.create_modern_card(content_container, "Security Log Entries")
+        log_card.pack(fill='both', expand=True)
         
-        # Create text widget with scrollbar
-        text_frame = tk.Frame(log_frame, bg='darkblue')
-        text_frame.pack(fill='both', expand=True, padx=10, pady=10)
+        log_content = tk.Frame(log_card, bg=self.colors['card'])
+        log_content.pack(fill='both', expand=True, padx=20, pady=15)
         
+        # Modern log text area
         self.logs_output = tk.Text(
-            text_frame,
-            font=("Courier", 9),
-            bg='black',
-            fg='lightgreen',
+            log_content,
+            font=("Consolas", 9),
+            bg='#1e1e1e',
+            fg='#ffffff',
+            insertbackground='white',
+            relief='flat',
+            bd=0,
             wrap=tk.WORD
         )
-        self.logs_output.pack(side='left', fill='both', expand=True)
         
-        scrollbar = tk.Scrollbar(text_frame, command=self.logs_output.yview)
-        scrollbar.pack(side='right', fill='y')
-        self.logs_output.config(yscrollcommand=scrollbar.set)
+        log_scrollbar = ttk.Scrollbar(log_content, command=self.logs_output.yview)
+        self.logs_output.configure(yscrollcommand=log_scrollbar.set)
+        
+        self.logs_output.pack(side='left', fill='both', expand=True)
+        log_scrollbar.pack(side='right', fill='y')
         
         # Load initial logs
         self.refresh_security_logs()
-    
-    def open_user_management(self):
-        """Deprecated - replaced by show_user_management."""
-        self.show_user_management()
     
     def view_security_logs(self):
         """Deprecated - replaced by show_security_logs."""
@@ -2276,107 +3235,95 @@ The camera is likely being used by:
         self.show_custom_dialog("Create LDAP User", "Enter username:", "info", input_field=True, callback=on_username_input)
     
     def show_selection_dialog(self, title, message, options, callback):
-        """Show a selection dialog with multiple options."""
-        dialog = tk.Toplevel(self.root)
-        dialog.title(title)
-        dialog.geometry("300x250")
-        dialog.configure(bg='#0f1419')
-        dialog.transient(self.root)
-        dialog.grab_set()
+        """Show a modern selection dialog with multiple options."""
+        # Create overlay instead of toplevel for consistency
+        self.dialog_overlay = tk.Frame(self.root, bg='#404040')
+        self.dialog_overlay.place(x=0, y=0, relwidth=1, relheight=1)
         
-        # Center the dialog
-        dialog.update_idletasks()
-        x = (dialog.winfo_screenwidth() // 2) - (dialog.winfo_width() // 2)
-        y = (dialog.winfo_screenheight() // 2) - (dialog.winfo_height() // 2)
-        dialog.geometry(f"+{x}+{y}")
+        # Modern dialog frame
+        dialog_frame = tk.Frame(self.dialog_overlay, bg=self.colors['card'], 
+                               relief='flat', bd=0)
+        dialog_frame.place(relx=0.5, rely=0.5, anchor='center', width=380, height=400)
         
-        # Message label
-        msg_label = tk.Label(
-            dialog,
-            text=message,
-            fg='white',
-            bg='#0f1419',
-            font=("Segoe UI", 11),
-            wraplength=280
-        )
-        msg_label.pack(pady=20)
+        # Add subtle shadow
+        shadow_frame = tk.Frame(self.dialog_overlay, bg='#808080', relief='flat', bd=0)
+        shadow_frame.place(relx=0.5, rely=0.5, anchor='center', width=385, height=405)
+        dialog_frame.lift()
+        
+        # Modern header
+        header_frame = tk.Frame(dialog_frame, bg=self.colors['primary'], height=50)
+        header_frame.pack(fill='x')
+        header_frame.pack_propagate(False)
+        
+        header_label = tk.Label(header_frame, text=f"📋 {title}",
+                              bg=self.colors['primary'], fg='white',
+                              font=("Segoe UI", 12, "bold"))
+        header_label.pack(pady=12)
+        
+        # Content area
+        content_frame = tk.Frame(dialog_frame, bg=self.colors['card'])
+        content_frame.pack(fill='both', expand=True, padx=25, pady=20)
+        
+        # Message
+        msg_label = tk.Label(content_frame, text=message,
+                           fg=self.colors['on_surface'], bg=self.colors['card'],
+                           font=("Segoe UI", 11), wraplength=320)
+        msg_label.pack(pady=(0, 20))
         
         # Selection variable
         selection = tk.StringVar(value=options[0] if options else "")
         
-        # Radio buttons for options
-        for option in options:
-            rb = tk.Radiobutton(
-                dialog,
-                text=option.title(),
-                variable=selection,
-                value=option,
-                fg='white',
-                bg='#0f1419',
-                selectcolor='#4299e1',
-                activebackground='#1a2332',
-                activeforeground='white',
-                font=("Segoe UI", 10)
-            )
-            rb.pack(anchor='w', padx=40, pady=5)
+        # Modern radio buttons in a frame
+        options_frame = tk.Frame(content_frame, bg=self.colors['surface'], 
+                               relief='flat', bd=1)
+        options_frame.pack(fill='x', pady=(0, 20))
         
-        # Buttons
-        btn_frame = tk.Frame(dialog, bg='#0f1419')
-        btn_frame.pack(pady=20)
+        for i, option in enumerate(options):
+            option_frame = tk.Frame(options_frame, bg=self.colors['surface'])
+            option_frame.pack(fill='x', padx=15, pady=8)
+            
+            rb = tk.Radiobutton(option_frame, text=option.title(), variable=selection, value=option,
+                              fg=self.colors['on_surface'], bg=self.colors['surface'], 
+                              selectcolor=self.colors['accent'], 
+                              activebackground=self.colors['surface'],
+                              activeforeground=self.colors['on_surface'],
+                              font=("Segoe UI", 10))
+            rb.pack(anchor='w')
+        
+        # Modern buttons
+        btn_frame = tk.Frame(content_frame, bg=self.colors['card'])
+        btn_frame.pack(side='bottom')
         
         def on_confirm():
             selected = selection.get()
-            dialog.destroy()
+            self.dialog_overlay.destroy()
+            self.dialog_overlay = None
             if callback:
                 callback(selected)
         
         def on_cancel():
-            dialog.destroy()
+            self.dialog_overlay.destroy()
+            self.dialog_overlay = None
             if callback:
                 callback(None)
         
-        confirm_btn = tk.Button(
-            btn_frame, 
-            text="Confirm", 
-            command=on_confirm,
-            font=("Segoe UI", 10, "bold"),
-            bg='#4299e1', 
-            fg='white',
-            width=10,
-            height=1,
-            relief='flat',
-            borderwidth=0
-        )
-        confirm_btn.pack(side='left', padx=10)
+        confirm_btn = tk.Button(btn_frame, text="✓ Confirm", command=on_confirm,
+                              font=("Segoe UI", 10, "bold"), bg=self.colors['primary'], 
+                              fg='white', relief='flat', bd=0, padx=20, pady=8)
+        confirm_btn.pack(side='left', padx=(0, 10))
         
-        cancel_btn = tk.Button(
-            btn_frame, 
-            text="Cancel", 
-            command=on_cancel,
-            font=("Segoe UI", 10, "bold"),
-            bg='#e53e3e', 
-            fg='white',
-            width=10,
-            height=1,
-            relief='flat',
-            borderwidth=0
-        )
-        cancel_btn.pack(side='left', padx=10)
-
+        cancel_btn = tk.Button(btn_frame, text="✗ Cancel", command=on_cancel,
+                             font=("Segoe UI", 10, "bold"), bg=self.colors['dark'], 
+                             fg='white', relief='flat', bd=0, padx=20, pady=8)
+        cancel_btn.pack(side='left')
+        
         # Add hover effects
-        def on_enter_confirm(e):
-            confirm_btn.config(bg='#3182ce')
-        def on_leave_confirm(e):
-            confirm_btn.config(bg='#4299e1')
-        def on_enter_cancel(e):
-            cancel_btn.config(bg='#c53030')
-        def on_leave_cancel(e):
-            cancel_btn.config(bg='#e53e3e')
-            
-        confirm_btn.bind("<Enter>", on_enter_confirm)
-        confirm_btn.bind("<Leave>", on_leave_confirm)
-        cancel_btn.bind("<Enter>", on_enter_cancel)
-        cancel_btn.bind("<Leave>", on_leave_cancel)
+        def add_hover_effect(button, hover_color, normal_color):
+            button.bind('<Enter>', lambda e: button.config(bg=hover_color))
+            button.bind('<Leave>', lambda e: button.config(bg=normal_color))
+        
+        add_hover_effect(confirm_btn, self.colors['primary_light'], self.colors['primary'])
+        add_hover_effect(cancel_btn, '#374151', self.colors['dark'])
 
     def refresh_security_logs(self):
         """Refresh and display security logs."""
@@ -2608,52 +3555,82 @@ The camera is likely being used by:
         self.clear_screen()
         self.current_screen = "failure"
         
-        # Center frame
-        center_frame = tk.Frame(self.root, bg='darkred')
-        center_frame.pack(expand=True, fill='both')
+        # Main container with modern background
+        main_frame = tk.Frame(self.root, bg=self.colors['background'])
+        main_frame.pack(expand=True, fill='both')
+        
+        # Header with danger color
+        header_frame = tk.Frame(main_frame, bg=self.colors['danger'], height=100)
+        header_frame.pack(fill='x')
+        header_frame.pack_propagate(False)
+        
+        header_title = tk.Label(
+            header_frame,
+            text="❌ AUTHENTICATION FAILED",
+            fg='white',
+            bg=self.colors['danger'],
+            font=("Segoe UI", 20, "bold")
+        )
+        header_title.pack(expand=True)
+        
+        # Center container
+        center_container = tk.Frame(main_frame, bg=self.colors['background'])
+        center_container.pack(expand=True, fill='both', padx=150, pady=50)
+        
+        # Failure card
+        failure_card = self.create_modern_card(center_container, "Access Denied")
+        failure_card.pack(fill='both', expand=True)
+        
+        failure_content = tk.Frame(failure_card, bg=self.colors['card'])
+        failure_content.pack(expand=True, fill='both', padx=40, pady=30)
         
         # Failure icon
         failure_icon = tk.Label(
-            center_frame,
+            failure_content,
             text="❌",
-            fg="white",
-            bg="darkred",
-            font=("Helvetica", 100)
+            fg=self.colors['danger'],
+            bg=self.colors['card'],
+            font=("Segoe UI", 80, "bold")
         )
-        failure_icon.pack(pady=(100, 30))
+        failure_icon.pack(pady=(20, 30))
         
         # Failure message
         failure_label = tk.Label(
-            center_frame,
+            failure_content,
             text="AUTHENTICATION FAILED",
-            fg="white",
-            bg="darkred",
-            font=("Helvetica", 24, "bold")
+            fg=self.colors['danger'],
+            bg=self.colors['card'],
+            font=("Segoe UI", 24, "bold")
         )
         failure_label.pack(pady=(0, 20))
         
         # Error details
         error_label = tk.Label(
-            center_frame,
+            failure_content,
             text=error_message,
-            fg="lightgray",
-            bg="darkred",
-            font=("Helvetica", 16)
+            fg=self.colors['on_surface'],
+            bg=self.colors['card'],
+            font=("Segoe UI", 14, "normal"),
+            wraplength=500,
+            justify='center'
         )
-        error_label.pack(pady=20)
+        error_label.pack(pady=(0, 30))
         
         # Retry button
         retry_btn = tk.Button(
-            center_frame,
-            text="🔄 Retry Authentication",
+            failure_content,
+            text="🔄 Try Again",
             command=self.show_method_selection,
-            font=("Helvetica", 14, "bold"),
-            bg="red",
-            fg="white",
-            width=20,
-            height=2
+            font=("Segoe UI", 14, "bold"),
+            bg=self.colors['primary'],
+            fg='white',
+            relief='flat',
+            bd=0,
+            padx=30,
+            pady=12,
+            cursor='hand2'
         )
-        retry_btn.pack(pady=30)
+        retry_btn.pack(pady=(0, 20))
     
     def show_security_error(self, title, message):
         """Show security error dialog."""

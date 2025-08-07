@@ -30,6 +30,24 @@ class SecurityOverlay:
         self.monitoring_thread = None
         self.stop_monitoring = False
         
+        # Modern color scheme - consistent with GUI manager
+        self.colors = {
+            'primary': '#1e3a8a',      # Deep blue
+            'primary_light': '#3b82f6', # Light blue
+            'secondary': '#0f172a',     # Dark blue/black
+            'accent': '#06b6d4',        # Cyan
+            'success': '#10b981',       # Green
+            'warning': '#f59e0b',       # Orange
+            'danger': '#ef4444',        # Red
+            'light': '#f8fafc',         # Light gray
+            'dark': '#1f2937',          # Dark gray
+            'surface': '#ffffff',       # White
+            'on_surface': '#374151',    # Text on white
+            'background': '#f1f5f9',    # Light background
+            'card': '#ffffff',          # Card background
+            'border': '#e5e7eb'         # Border color
+        }
+        
     def create_root(self):
         """Create root window."""
         if self.root is None:
@@ -47,80 +65,114 @@ class SecurityOverlay:
         self.overlay_window.title("Device Locked")
         self.overlay_window.attributes("-fullscreen", True)
         self.overlay_window.attributes("-topmost", True)
-        self.overlay_window.configure(bg='black')
+        self.overlay_window.configure(bg=self.colors['background'])
         self.overlay_window.resizable(False, False)
         self.overlay_window.protocol("WM_DELETE_WINDOW", lambda: None)  # Prevent closing
         
+        # Header with danger color
+        header_frame = tk.Frame(self.overlay_window, bg=self.colors['danger'], height=120)
+        header_frame.pack(fill='x')
+        header_frame.pack_propagate(False)
+        
+        header_title = tk.Label(
+            header_frame,
+            text="🔒 DEVICE LOCKED",
+            fg='white',
+            bg=self.colors['danger'],
+            font=("Segoe UI", 24, "bold")
+        )
+        header_title.pack(expand=True)
+        
         # Center frame
-        center_frame = tk.Frame(self.overlay_window, bg='black')
-        center_frame.pack(expand=True)
+        center_frame = tk.Frame(self.overlay_window, bg=self.colors['background'])
+        center_frame.pack(expand=True, fill='both', padx=150, pady=50)
         
-        # Lock icon and title
-        lock_label = tk.Label(
-            center_frame,
-            text="🔒",
-            fg="red",
-            bg="black",
-            font=("Helvetica", 100, "bold")
-        )
-        lock_label.pack(pady=(50, 20))
+        # Lock card
+        lock_card = tk.Frame(center_frame, bg=self.colors['card'], relief='flat', bd=0)
+        lock_card.pack(fill='both', expand=True)
         
-        title_label = tk.Label(
-            center_frame,
-            text="DEVICE LOCKED",
-            fg="red",
-            bg="black",
-            font=("Helvetica", 36, "bold")
-        )
-        title_label.pack(pady=(0, 10))
+        # Card header
+        card_header = tk.Frame(lock_card, bg=self.colors['primary'], height=60)
+        card_header.pack(fill='x')
+        card_header.pack_propagate(False)
         
-        subtitle_label = tk.Label(
-            center_frame,
+        card_title = tk.Label(
+            card_header,
             text="Authentication Required",
-            fg="white",
-            bg="black",
-            font=("Helvetica", 20)
+            fg='white',
+            bg=self.colors['primary'],
+            font=("Segoe UI", 16, "bold")
         )
-        subtitle_label.pack(pady=(0, 40))
+        card_title.pack(expand=True)
+        
+        # Card content
+        card_content = tk.Frame(lock_card, bg=self.colors['card'])
+        card_content.pack(expand=True, fill='both', padx=40, pady=30)
+        
+        # Lock icon
+        lock_label = tk.Label(
+            card_content,
+            text="🔒",
+            fg=self.colors['danger'],
+            bg=self.colors['card'],
+            font=("Segoe UI", 80, "bold")
+        )
+        lock_label.pack(pady=(20, 30))
+        
+        # Instructions
+        instruction_label = tk.Label(
+            card_content,
+            text="This device is locked for security.\nPlease authenticate to continue.",
+            fg=self.colors['on_surface'],
+            bg=self.colors['card'],
+            font=("Segoe UI", 16, "normal"),
+            justify='center'
+        )
+        instruction_label.pack(pady=(0, 30))
         
         # Unlock button
         unlock_btn = tk.Button(
-            center_frame,
+            card_content,
             text="🔓 Unlock Device",
             command=self.attempt_unlock,
-            font=("Helvetica", 18, "bold"),
-            bg="darkblue",
-            fg="white",
-            width=20,
-            height=3,
-            relief="raised",
-            bd=3
+            font=("Segoe UI", 16, "bold"),
+            bg=self.colors['primary'],
+            fg='white',
+            relief='flat',
+            bd=0,
+            padx=40,
+            pady=15,
+            cursor='hand2'
         )
-        unlock_btn.pack(pady=20)
+        unlock_btn.pack(pady=(0, 20))
         
         # Current user info (if session exists but expired)
         if self.auth_manager.session_manager.current_session:
             expired_user = self.auth_manager.session_manager.current_session.get('username', 'Unknown')
             expired_label = tk.Label(
-                center_frame,
+                card_content,
                 text=f"Session expired for: {expired_user}",
-                fg="yellow",
-                bg="black",
-                font=("Helvetica", 14)
+                fg=self.colors['warning'],
+                bg=self.colors['card'],
+                font=("Segoe UI", 12, "normal")
             )
-            expired_label.pack(pady=(20, 0))
+            expired_label.pack(pady=(10, 0))
         
-        # System info
+        # System info footer
+        footer_frame = tk.Frame(self.overlay_window, bg=self.colors['dark'], height=60)
+        footer_frame.pack(fill='x', side='bottom')
+        footer_frame.pack_propagate(False)
+        
         sys_info = SecurityUtils.get_system_info()
         info_text = f"Device: {sys_info['computer_name']} | IP: {sys_info['ip_address']}"
         info_label = tk.Label(
-            center_frame,
+            footer_frame,
             text=info_text,
-            fg="gray",
-            bg="black",
-            font=("Courier", 12)
+            fg='white',
+            bg=self.colors['dark'],
+            font=("Segoe UI", 10, "normal")
         )
-        info_label.pack(pady=(40, 20))
+        info_label.pack(expand=True)
 
     def attempt_unlock(self):
         """Attempt to unlock the device through authentication."""
