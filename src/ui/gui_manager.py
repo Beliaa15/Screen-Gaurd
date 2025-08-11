@@ -9,8 +9,6 @@ from tkinter import ttk, filedialog, messagebox
 import threading
 import time
 import os
-import string
-import secrets
 from datetime import datetime
 import subprocess
 import sys
@@ -25,8 +23,6 @@ from ..utils.security_utils import SecurityUtils
 from ..auth.ldap_auth import LDAPAuthenticator
 from ..auth.deepface_auth import DeepFaceAuthenticator
 from ..auth.biometric_auth import BiometricAuthenticator
-import secrets
-import string
 
 
 class SecurityGUI:
@@ -58,6 +54,7 @@ class SecurityGUI:
         self.first_name_var = tk.StringVar()
         self.last_name_var = tk.StringVar()
         self.email_var = tk.StringVar()
+        self.password_var = tk.StringVar()
         self.role_var = tk.StringVar(value="user")
         self.selected_image_path = ""
         self.ldap_user_var = tk.StringVar()
@@ -805,35 +802,20 @@ class SecurityGUI:
         cards_frame = tk.Frame(auth_container, bg=self.colors['background'])
         cards_frame.pack(expand=True)
         
-        # Welcome card - compact size
-        welcome_card = self.create_modern_card(cards_frame, "Welcome")
-        welcome_card.pack(pady=(50, 20), padx=50)
-        
-        welcome_label = tk.Label(
-            welcome_card,
-            text="Face Recognition Security System\nPosition your face in front of the camera to access the system",
-            fg=self.colors['on_surface'],
-            bg=self.colors['card'],
-            font=("Segoe UI", 14, "normal"),
-            wraplength=500,
-            justify='center'
-        )
-        welcome_label.pack(pady=20, padx=30)
-        
         # Authentication methods card - compact size
         methods_card = self.create_modern_card(cards_frame, "Primary: Face Recognition")
         methods_card.pack(pady=10, padx=50)
         
         # Create modern authentication buttons
         self.create_modern_auth_buttons(methods_card)
-        
-        # Auto-start face recognition after 5 seconds
-        self.auto_start_timer = self.root.after(5000, lambda: self.auto_start_face_recognition())
+
+        # Auto-start face recognition after 10 seconds
+        self.auto_start_timer = self.root.after(10000, lambda: self.auto_start_face_recognition())
         
         # Add countdown indicator
         self.countdown_label = tk.Label(
             cards_frame,
-            text="Face recognition will start automatically in 5 seconds...",
+            text="Face recognition will start automatically in 10 seconds...",
             fg=self.colors['primary'],
             bg=self.colors['background'],
             font=("Segoe UI", 10, "italic")
@@ -907,7 +889,7 @@ class SecurityGUI:
         
         # Add prominent hover effects and click animation
         def on_enter_deep(e):
-            deepface_btn.config(bg=self.colors['primary_light'], font=("Segoe UI", 17, "bold"))
+            deepface_btn.config(bg=self.colors['primary_light'], font=("Segoe UI", 16, "bold"))
             badge_label.config(fg=self.colors['primary_light'])
         def on_leave_deep(e):
             deepface_btn.config(bg=self.colors['warning'], font=("Segoe UI", 16, "bold"))
@@ -942,12 +924,11 @@ class SecurityGUI:
             font=("Segoe UI", 10, "bold")
         )
         alt_label.pack(pady=(0, 10))
-        
-        # Fingerprint button - smaller
-        fingerprint_btn = tk.Button(
+        # Email/Password button - smaller
+        emailpassword_btn = tk.Button(
             alt_frame,
-            text="👆 Fingerprint",
-            command=lambda: self.select_auth_method("fingerprint"),
+            text="Email/Password",
+            command=lambda: self.select_auth_method("email_password"),
             font=("Segoe UI", 10, "normal"),
             bg=self.colors['primary'],
             fg='white',
@@ -958,35 +939,7 @@ class SecurityGUI:
             cursor='hand2',
             width=20
         )
-        fingerprint_btn.pack(pady=5)
-        
-        # Development access - small button in corner
-        dev_frame = tk.Frame(buttons_container, bg=self.colors['card'])
-        dev_frame.pack(side='bottom', anchor='se', pady=(30, 0))
-        
-        dev_btn = tk.Button(
-            dev_frame,
-            text="🔧",
-            command=lambda: self.select_auth_method("email_password"),
-            font=("Segoe UI", 8, "normal"),
-            bg=self.colors['border'],
-            fg=self.colors['on_surface'],
-            relief='flat',
-            bd=0,
-            padx=6,
-            pady=3,
-            cursor='hand2'
-        )
-        dev_btn.pack(side='right')
-        
-        # Dev button tooltip on hover - more discrete
-        def show_dev_tooltip(e):
-            dev_btn.config(text="Dev", bg=self.colors['dark'], fg='white')
-        def hide_dev_tooltip(e):
-            dev_btn.config(text="🔧", bg=self.colors['border'], fg=self.colors['on_surface'])
-        
-        dev_btn.bind("<Enter>", show_dev_tooltip)
-        dev_btn.bind("<Leave>", hide_dev_tooltip)
+        emailpassword_btn.pack(pady=5)
     
     def auto_start_face_recognition(self):
         """Auto-start face recognition after countdown."""
@@ -1588,8 +1541,8 @@ class SecurityGUI:
         
         # Password prompt card
         password_card = self.create_modern_card(center_container, "Domain Authentication Required")
-        password_card.pack(fill='both', expand=True)
-        
+        password_card.pack(fill='x', expand=True)
+
         password_content = tk.Frame(password_card, bg=self.colors['card'])
         password_content.pack(expand=True, fill='both', padx=40, pady=30)
         
@@ -2219,13 +2172,37 @@ class SecurityGUI:
                 font=("Segoe UI", 10, "bold")).grid(row=6, column=0, sticky='w', pady=(0, 5))
         self.create_modern_entry(info_content, textvariable=self.email_var).grid(row=7, column=0, sticky='ew', pady=(0, 15))
         
+        # Password
+        tk.Label(info_content, text="Password:", 
+                fg=self.colors['on_surface'], bg=self.colors['card'], 
+                font=("Segoe UI", 10, "bold")).grid(row=8, column=0, sticky='w', pady=(0, 5))
+        self.create_modern_entry(info_content, textvariable=self.password_var, show='*').grid(row=9, column=0, sticky='ew', pady=(0, 5))
+        
+        # Bind real-time password validation
+        self.password_var.trace('w', lambda *args: self.update_password_strength())
+        
+        # Password strength indicator
+        self.password_strength_label = tk.Label(info_content, 
+                                              text="", 
+                                              fg=self.colors['on_surface'], bg=self.colors['card'], 
+                                              font=("Segoe UI", 8, "normal"))
+        self.password_strength_label.grid(row=10, column=0, sticky='w', pady=(0, 5))
+        
+        # Password hint
+        password_hint = tk.Label(info_content, 
+                               text="LDAP Password Requirements:\n• 8-128 characters\n• Uppercase + lowercase + number + special char\n• Cannot contain username\n• No 3+ consecutive identical chars", 
+                               fg=self.colors['accent'], bg=self.colors['card'], 
+                               font=("Segoe UI", 8, "italic"),
+                               justify='left')
+        password_hint.grid(row=11, column=0, sticky='w', pady=(0, 15))
+        
         # Role selection with modern radio buttons
         tk.Label(info_content, text="Role:", 
                 fg=self.colors['on_surface'], bg=self.colors['card'], 
-                font=("Segoe UI", 10, "bold")).grid(row=8, column=0, sticky='w', pady=(0, 5))
+                font=("Segoe UI", 10, "bold")).grid(row=12, column=0, sticky='w', pady=(0, 5))
         
         role_frame = tk.Frame(info_content, bg=self.colors['card'])
-        role_frame.grid(row=9, column=0, sticky='ew', pady=(0, 10))
+        role_frame.grid(row=13, column=0, sticky='ew', pady=(0, 10))
         
         roles = [("User", "user"), ("Operator", "operator"), ("Admin", "admin")]
         for i, (text, value) in enumerate(roles):
@@ -2239,7 +2216,7 @@ class SecurityGUI:
                           text="📁 Users will be created in SecuritySystem OU", 
                           fg=self.colors['accent'], bg=self.colors['card'], 
                           font=("Segoe UI", 8, "italic"))
-        ou_info.grid(row=10, column=0, sticky='w', pady=(0, 15))
+        ou_info.grid(row=14, column=0, sticky='w', pady=(0, 15))
         
         # Configure grid weights
         info_content.grid_columnconfigure(0, weight=1)
@@ -2248,7 +2225,7 @@ class SecurityGUI:
         clear_btn = tk.Button(info_content, text="Clear Form", command=self.clear_user_form,
                              bg=self.colors['dark'], fg='white', 
                              font=("Segoe UI", 9, "bold"), relief='flat', bd=0, padx=15, pady=5)
-        clear_btn.grid(row=11, column=0, sticky='e', pady=(0, 0))
+        clear_btn.grid(row=15, column=0, sticky='e', pady=(0, 0))
         
         # Image Selection Card
         image_card = self.create_modern_card(padding_frame, "Face Image (Optional)")
@@ -2649,12 +2626,105 @@ class SecurityGUI:
         self.log_user_mgmt_message("User Management System initialized")
     
     # User Management Helper Methods
-    def validate_user_info(self):
-        """Validate that required user information is provided."""
+    def update_password_strength(self):
+        """Update password strength indicator in real-time."""
+        if not hasattr(self, 'password_strength_label'):
+            return
+            
+        password = self.password_var.get()
         username = self.username_var.get().strip()
+        
+        if not password:
+            self.password_strength_label.config(text="", fg=self.colors['on_surface'])
+            return
+            
+        # Check requirements
+        length_ok = 8 <= len(password) <= 128
+        has_upper = any(c.isupper() for c in password)
+        has_lower = any(c.islower() for c in password)
+        has_digit = any(c.isdigit() for c in password)
+        has_special = any(c in "!@#$%^&*()_+-=[]{}|;:,.<>?" for c in password)
+        
+        # Check for weak patterns
+        no_username = username.lower() not in password.lower() if username else True
+        no_repeated = True
+        for i in range(len(password) - 2):
+            if password[i] == password[i+1] == password[i+2]:
+                no_repeated = False
+                break
+        
+        # Count satisfied requirements
+        requirements = [length_ok, has_upper, has_lower, has_digit, has_special, no_username, no_repeated]
+        satisfied = sum(requirements)
+        
+        if satisfied == 7:
+            strength_text = "✅ Strong - All requirements met"
+            color = self.colors['success']
+        elif satisfied >= 5:
+            strength_text = f"🟡 Good - {7-satisfied} requirement(s) missing"
+            color = self.colors['warning']
+        elif satisfied >= 3:
+            strength_text = f"🟠 Fair - {7-satisfied} requirement(s) missing"
+            color = '#ff8c00'  # Orange
+        else:
+            strength_text = f"🔴 Weak - {7-satisfied} requirement(s) missing"
+            color = self.colors['danger']
+            
+        self.password_strength_label.config(text=strength_text, fg=color)
+    
+    def validate_user_info(self):
+        """Validate that required user information is provided with LDAP password policy."""
+        username = self.username_var.get().strip()
+        password = self.password_var.get().strip()
+        
         if not username:
             self.log_user_mgmt_message("ERROR: Username is required", "error")
             return False
+        
+        if not password:
+            self.log_user_mgmt_message("ERROR: Password is required", "error")
+            return False
+            
+        # LDAP/Domain Password Policy Validation
+        if len(password) < 8:
+            self.log_user_mgmt_message("ERROR: Password must be at least 8 characters long", "error")
+            return False
+            
+        if len(password) > 128:
+            self.log_user_mgmt_message("ERROR: Password cannot exceed 128 characters", "error")
+            return False
+            
+        # Check for required character types
+        has_upper = any(c.isupper() for c in password)
+        has_lower = any(c.islower() for c in password)
+        has_digit = any(c.isdigit() for c in password)
+        has_special = any(c in "!@#$%^&*()_+-=[]{}|;:,.<>?" for c in password)
+        
+        missing_types = []
+        if not has_upper:
+            missing_types.append("uppercase letter")
+        if not has_lower:
+            missing_types.append("lowercase letter")
+        if not has_digit:
+            missing_types.append("number")
+        if not has_special:
+            missing_types.append("special character (!@#$%^&*()_+-=[]{}|;:,.<>?)")
+            
+        if missing_types:
+            self.log_user_mgmt_message(f"ERROR: Password must contain at least one: {', '.join(missing_types)}", "error")
+            return False
+            
+        # Check for common weak patterns
+        if username.lower() in password.lower():
+            self.log_user_mgmt_message("ERROR: Password cannot contain the username", "error")
+            return False
+            
+        # Check for consecutive repeated characters (more than 2)
+        for i in range(len(password) - 2):
+            if password[i] == password[i+1] == password[i+2]:
+                self.log_user_mgmt_message("ERROR: Password cannot contain more than 2 consecutive identical characters", "error")
+                return False
+                
         return True
     
     def get_user_info(self):
@@ -2664,6 +2734,7 @@ class SecurityGUI:
             'first_name': self.first_name_var.get().strip(),
             'last_name': self.last_name_var.get().strip(),
             'email': self.email_var.get().strip(),
+            'password': self.password_var.get().strip(),
             'role': self.role_var.get()
         }
     
@@ -2720,10 +2791,13 @@ class SecurityGUI:
         self.first_name_var.set("")
         self.last_name_var.set("")
         self.email_var.set("")
+        self.password_var.set("")
         self.role_var.set("user")
         self.selected_image_path = ""
         if hasattr(self, 'image_label'):
             self.image_label.config(text="No image selected", fg='gray')
+        if hasattr(self, 'password_strength_label'):
+            self.password_strength_label.config(text="", fg=self.colors['on_surface'])
         self.log_user_mgmt_message("Form cleared")
     
     def select_image_file(self):
@@ -2907,7 +2981,8 @@ class SecurityGUI:
                         last_name=user_info['last_name'],
                         email=user_info['email'],
                         role=user_info['role'],
-                        image_path=temp_path
+                        image_path=temp_path,
+                        temp_password=user_info['password']
                     )
                     
                     # Clean up temp file
@@ -2957,7 +3032,8 @@ class SecurityGUI:
                 last_name=user_info['last_name'],
                 email=user_info['email'],
                 role=user_info['role'],
-                image_path=self.selected_image_path
+                image_path=self.selected_image_path,
+                temp_password=user_info['password']
             )
             
             if success:
@@ -2979,32 +3055,9 @@ class SecurityGUI:
         self.log_user_mgmt_message(f"Creating LDAP user: {user_info['username']}")
         
         try:
-            # Generate a secure password that meets typical domain requirements
-            password_length = 14  # Increased length
-            # Include all required character types for domain policy
-            uppercase = string.ascii_uppercase
-            lowercase = string.ascii_lowercase
-            digits = string.digits
-            special = "!@#$%^&*()_+-=[]{}|;:,.<>?"
-            
-            # Ensure password contains at least one of each type
-            temp_password = (
-                secrets.choice(uppercase) +
-                secrets.choice(lowercase) + 
-                secrets.choice(digits) +
-                secrets.choice(special) +
-                ''.join(secrets.choice(uppercase + lowercase + digits + special) 
-                       for _ in range(password_length - 4))
-            )
-            
-            # Shuffle the password to randomize character positions
-            password_list = list(temp_password)
-            secrets.SystemRandom().shuffle(password_list)
-            temp_password = ''.join(password_list)
-
             success, message = self.ldap_auth.create_user(
                 username=user_info['username'],
-                password=temp_password,
+                password=user_info['password'],
                 first_name=user_info['first_name'],
                 last_name=user_info['last_name'],
                 email=user_info['email'],
@@ -3012,7 +3065,7 @@ class SecurityGUI:
             )
             
             if success:
-                self.log_user_mgmt_message(f"SUCCESS: LDAP user created. Temporary password: {temp_password}", "success")
+                self.log_user_mgmt_message(f"SUCCESS: LDAP user created successfully", "success")
                 self.log_user_mgmt_message(f"Message: {message}")
                 self.refresh_user_list_unified()
                 self.clear_user_form()
@@ -3405,97 +3458,6 @@ class SecurityGUI:
         """Log message to user management output area."""
         self.log_user_mgmt_message(message, "info")
     
-    def register_face_camera(self):
-        """Register face from camera."""
-        def on_username_input(username):
-            if not username:
-                return
-            
-            def on_password_input(password):
-                if not password:
-                    return
-                
-                self.log_user_mgmt_output(f"Starting face registration for user: {username}")
-                self.log_user_mgmt_output("⚠️  Important: If detection system is running, camera access may conflict")
-                self.log_user_mgmt_output("📷 Attempting to access camera for face capture...")
-                
-                def registration_thread():
-                    try:
-                        # Show warning about potential camera conflicts
-                        self.root.after(0, lambda: self.log_user_mgmt_output("🔄 Checking camera availability..."))
-                        
-                        success = self.deepface_auth.register_face(username, first_name="", last_name="", 
-                                                                 email="", role="user", image_path=None, password=password)
-                        if success:
-                            self.root.after(0, lambda: self.log_user_mgmt_output(f"✅ Face registered successfully for {username}"))
-                            self.root.after(0, lambda: self.show_custom_dialog("Success", 
-                                f"Face registered successfully for {username}!\n\nThe user can now authenticate using face recognition.", "info"))
-                        else:
-                            error_msg = f"Face registration failed for {username}"
-                            self.root.after(0, lambda: self.log_user_mgmt_output(f"❌ {error_msg}"))
-                            self.root.after(0, lambda: self.log_user_mgmt_output("💡 Troubleshooting tips:"))
-                            self.root.after(0, lambda: self.log_user_mgmt_output("   - Ensure camera is not being used by detection system"))
-                            self.root.after(0, lambda: self.log_user_mgmt_output("   - Check camera permissions"))
-                            self.root.after(0, lambda: self.log_user_mgmt_output("   - Try using image registration instead"))
-                            
-                            detailed_error = """Face registration failed. 
-                            Ensure good lighting and clear face visibility"""
-                            
-                            self.root.after(0, lambda: self.show_custom_dialog("Registration Failed", detailed_error, "error"))
-                    except Exception as e:
-                        error_msg = f"Error during face registration: {str(e)}"
-                        self.root.after(0, lambda: self.log_user_mgmt_output(f"❌ {error_msg}"))
-                        
-                        # Provide specific guidance based on the error
-                        if "cannot access camera" in str(e).lower() or "msmf" in str(e).lower():
-                            self.root.after(0, lambda: self.log_user_mgmt_output("🔧 Camera access error detected"))
-                            self.root.after(0, lambda: self.log_user_mgmt_output("   This usually means another process is using the camera"))
-                            troubleshoot_msg = """Camera Access Error
-
-The camera is likely being used by:
-• Object detection system
-• Another application
-• System monitoring
-"""
-                        else:
-                            troubleshoot_msg = f"Face Registration Error\n\nError: {str(e)}\n\nPlease try again or use image registration instead."
-                        
-                        self.root.after(0, lambda: self.show_custom_dialog("Error", troubleshoot_msg, "error"))
-                
-                threading.Thread(target=registration_thread, daemon=True).start()
-            
-            self.show_custom_dialog("Password", f"Enter password for {username}:", "info", input_field=True, password=True, callback=on_password_input)
-
-        # Show initial warning about camera usage
-        def proceed_with_registration():
-            self.show_custom_dialog("Username", "Enter username for face registration:", "info", input_field=True, callback=on_username_input)
-        
-        warning_msg = """⚠️ Important Notes
-• Press SPACE to capture your face
-• Press ESC to cancel
-• Ensure good lighting for best results
-"""
-        
-        self.show_custom_dialog("Camera Registration", warning_msg, "yesno", callback=lambda confirmed: proceed_with_registration() if confirmed else None)
-
-    def register_face_image(self):
-        """Register face from image file."""
-        def on_username_input(username):
-            if not username:
-                return
-            
-            def on_password_input(password):
-                if not password:
-                    return
-                
-                # Show file selection dialog within the GUI
-                self.show_file_selection_dialog("Select face image", [("Image files", "*.jpg *.jpeg *.png *.bmp")], 
-                                               lambda image_path: self._process_image_registration(username, password, image_path))
-            
-            self.show_custom_dialog("Password", "Enter password for LDAP authentication:", "info", input_field=True, callback=on_password_input, password=True)
-        
-        self.show_custom_dialog("Username", "Enter username for face registration:", "info", input_field=True, callback=on_username_input)
-    
     def show_file_selection_dialog(self, title, filetypes, callback):
         """Show file selection dialog within GUI."""
         # For now, we'll use a simple text input for the file path
@@ -3658,208 +3620,6 @@ The camera is likely being used by:
         
         self.show_custom_dialog("LDAP Test", "Enter username:", "info", input_field=True, callback=on_username_input)
     
-    def create_ldap_user_camera(self):
-        """Create LDAP user and register face from camera."""
-        def on_username_input(username):
-            if not username:
-                return
-            
-            def on_first_name_input(first_name):
-                def on_last_name_input(last_name):
-                    def on_email_input(email):
-                        def on_role_selection(role):
-                            if not role:
-                                role = "user"
-                            
-                            self.log_user_mgmt_output(f"Creating LDAP user with face registration: {username}")
-                            self.log_user_mgmt_output(f"Name: {first_name} {last_name}, Role: {role}, Email: {email}")
-                            
-                            def creation_thread():
-                                try:
-                                    success, message = self.deepface_auth.create_ldap_user_with_face(
-                                        username=username,
-                                        first_name=first_name or "",
-                                        last_name=last_name or "",
-                                        email=email or "",
-                                        role=role,
-                                        image_path=None  # Camera capture
-                                    )
-                                    
-                                    if success:
-                                        self.root.after(0, lambda: self.log_user_mgmt_output(f"✅ {message}"))
-                                        self.root.after(0, lambda: self.show_custom_dialog("Success", message, "info"))
-                                    else:
-                                        self.root.after(0, lambda: self.log_user_mgmt_output(f"❌ {message}"))
-                                        self.root.after(0, lambda: self.show_custom_dialog("Error", message, "error"))
-                                except Exception as e:
-                                    error_msg = f"Error creating LDAP user with face: {e}"
-                                    self.root.after(0, lambda: self.log_user_mgmt_output(f"❌ {error_msg}"))
-                                    self.root.after(0, lambda: self.show_custom_dialog("Error", error_msg, "error"))
-                            
-                            threading.Thread(target=creation_thread, daemon=True).start()
-                        
-                        # Role selection dialog
-                        role_options = ["user", "operator", "admin"]
-                        self.show_selection_dialog("Select Role", "Choose user role:", role_options, on_role_selection)
-                    
-                    self.show_custom_dialog("Email", "Enter email address (optional):", "info", input_field=True, callback=on_email_input)
-                
-                self.show_custom_dialog("Last Name", "Enter last name (optional):", "info", input_field=True, callback=on_last_name_input)
-            
-            self.show_custom_dialog("First Name", "Enter first name (optional):", "info", input_field=True, callback=on_first_name_input)
-        
-        self.show_custom_dialog("Create LDAP User", "Enter username:", "info", input_field=True, callback=on_username_input)
-    
-    def create_ldap_user_image(self):
-        """Create LDAP user and register face from image file."""
-        def on_username_input(username):
-            if not username:
-                return
-            
-            def on_first_name_input(first_name):
-                def on_last_name_input(last_name):
-                    def on_email_input(email):
-                        def on_role_selection(role):
-                            if not role:
-                                role = "user"
-                            
-                            def on_image_path_input(image_path):
-                                if not image_path:
-                                    return
-                                
-                                self.log_user_mgmt_output(f"Creating LDAP user with face registration: {username}")
-                                self.log_user_mgmt_output(f"Name: {first_name} {last_name}, Role: {role}, Email: {email}")
-                                self.log_user_mgmt_output(f"Image path: {image_path}")
-                                
-                                def creation_thread():
-                                    try:
-                                        success, message = self.deepface_auth.create_ldap_user_with_face(
-                                            username=username,
-                                            first_name=first_name or "",
-                                            last_name=last_name or "",
-                                            email=email or "",
-                                            role=role,
-                                            image_path=image_path
-                                        )
-                                        
-                                        if success:
-                                            self.root.after(0, lambda: self.log_user_mgmt_output(f"✅ {message}"))
-                                            self.root.after(0, lambda: self.show_custom_dialog("Success", message, "info"))
-                                        else:
-                                            self.root.after(0, lambda: self.log_user_mgmt_output(f"❌ {message}"))
-                                            self.root.after(0, lambda: self.show_custom_dialog("Error", message, "error"))
-                                    except Exception as e:
-                                        error_msg = f"Error creating LDAP user with face: {e}"
-                                        self.root.after(0, lambda: self.log_user_mgmt_output(f"❌ {error_msg}"))
-                                        self.root.after(0, lambda: self.show_custom_dialog("Error", error_msg, "error"))
-                                
-                                threading.Thread(target=creation_thread, daemon=True).start()
-                            
-                            self.show_custom_dialog("Image Path", "Enter full path to image file:", "info", input_field=True, callback=on_image_path_input)
-                        
-                        # Role selection dialog
-                        role_options = ["user", "operator", "admin"]
-                        self.show_selection_dialog("Select Role", "Choose user role:", role_options, on_role_selection)
-                    
-                    self.show_custom_dialog("Email", "Enter email address (optional):", "info", input_field=True, callback=on_email_input)
-                
-                self.show_custom_dialog("Last Name", "Enter last name (optional):", "info", input_field=True, callback=on_last_name_input)
-            
-            self.show_custom_dialog("First Name", "Enter first name (optional):", "info", input_field=True, callback=on_first_name_input)
-        
-        self.show_custom_dialog("Create LDAP User", "Enter username:", "info", input_field=True, callback=on_username_input)
-    
-    def show_selection_dialog(self, title, message, options, callback):
-        """Show a modern selection dialog with multiple options."""
-        # Create overlay instead of toplevel for consistency
-        self.dialog_overlay = tk.Frame(self.root, bg='#404040')
-        self.dialog_overlay.place(x=0, y=0, relwidth=1, relheight=1)
-        
-        # Modern dialog frame
-        dialog_frame = tk.Frame(self.dialog_overlay, bg=self.colors['card'], 
-                               relief='flat', bd=0)
-        dialog_frame.place(relx=0.5, rely=0.5, anchor='center', width=380, height=400)
-        
-        # Add subtle shadow
-        shadow_frame = tk.Frame(self.dialog_overlay, bg='#808080', relief='flat', bd=0)
-        shadow_frame.place(relx=0.5, rely=0.5, anchor='center', width=385, height=405)
-        dialog_frame.lift()
-        
-        # Modern header
-        header_frame = tk.Frame(dialog_frame, bg=self.colors['primary'], height=50)
-        header_frame.pack(fill='x')
-        header_frame.pack_propagate(False)
-        
-        header_label = tk.Label(header_frame, text=f"📋 {title}",
-                              bg=self.colors['primary'], fg='white',
-                              font=("Segoe UI", 12, "bold"))
-        header_label.pack(pady=12)
-        
-        # Content area
-        content_frame = tk.Frame(dialog_frame, bg=self.colors['card'])
-        content_frame.pack(fill='both', expand=True, padx=25, pady=20)
-        
-        # Message
-        msg_label = tk.Label(content_frame, text=message,
-                           fg=self.colors['on_surface'], bg=self.colors['card'],
-                           font=("Segoe UI", 11), wraplength=320)
-        msg_label.pack(pady=(0, 20))
-        
-        # Selection variable
-        selection = tk.StringVar(value=options[0] if options else "")
-        
-        # Modern radio buttons in a frame
-        options_frame = tk.Frame(content_frame, bg=self.colors['surface'], 
-                               relief='flat', bd=1)
-        options_frame.pack(fill='x', pady=(0, 20))
-        
-        for i, option in enumerate(options):
-            option_frame = tk.Frame(options_frame, bg=self.colors['surface'])
-            option_frame.pack(fill='x', padx=15, pady=8)
-            
-            rb = tk.Radiobutton(option_frame, text=option.title(), variable=selection, value=option,
-                              fg=self.colors['on_surface'], bg=self.colors['surface'], 
-                              selectcolor=self.colors['accent'], 
-                              activebackground=self.colors['surface'],
-                              activeforeground=self.colors['on_surface'],
-                              font=("Segoe UI", 10))
-            rb.pack(anchor='w')
-        
-        # Modern buttons
-        btn_frame = tk.Frame(content_frame, bg=self.colors['card'])
-        btn_frame.pack(side='bottom')
-        
-        def on_confirm():
-            selected = selection.get()
-            self.dialog_overlay.destroy()
-            self.dialog_overlay = None
-            if callback:
-                callback(selected)
-        
-        def on_cancel():
-            self.dialog_overlay.destroy()
-            self.dialog_overlay = None
-            if callback:
-                callback(None)
-        
-        confirm_btn = tk.Button(btn_frame, text="✓ Confirm", command=on_confirm,
-                              font=("Segoe UI", 10, "bold"), bg=self.colors['primary'], 
-                              fg='white', relief='flat', bd=0, padx=20, pady=8)
-        confirm_btn.pack(side='left', padx=(0, 10))
-        
-        cancel_btn = tk.Button(btn_frame, text="✗ Cancel", command=on_cancel,
-                             font=("Segoe UI", 10, "bold"), bg=self.colors['dark'], 
-                             fg='white', relief='flat', bd=0, padx=20, pady=8)
-        cancel_btn.pack(side='left')
-        
-        # Add hover effects
-        def add_hover_effect(button, hover_color, normal_color):
-            button.bind('<Enter>', lambda e: button.config(bg=hover_color))
-            button.bind('<Leave>', lambda e: button.config(bg=normal_color))
-        
-        add_hover_effect(confirm_btn, self.colors['primary_light'], self.colors['primary'])
-        add_hover_effect(cancel_btn, '#374151', self.colors['dark'])
-
     def refresh_security_logs(self):
         """Refresh and display security logs."""
         self.logs_output.delete(1.0, tk.END)

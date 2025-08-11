@@ -639,10 +639,10 @@ class DeepFaceAuthenticator(BaseAuthenticator):
             
             # TODO: fix password save in database
             # Verify the entered password matches stored hash
-            #if not self._verify_password(entered_password, password_hash, salt):
-            #   SecurityUtils.log_security_event("AUTH_FAILED", f"Password verification failed for {username}")
-            #   return None
-            
+            if not self._verify_password(entered_password, password_hash, salt):
+                SecurityUtils.log_security_event("AUTH_FAILED", f"Password verification failed for {username}")
+                return None
+
             # Now try LDAP authentication
             if self._authenticate_with_ldap(username, entered_password):
                 user_data = {
@@ -650,7 +650,7 @@ class DeepFaceAuthenticator(BaseAuthenticator):
                     'first_name': first_name or '',
                     'last_name': last_name or '',
                     'email': email or '',
-                    'role': role or 'user',
+                    'role': role or '',
                     'auth_method': 'face_and_ldap'
                 }
                 SecurityUtils.log_security_event("AUTH_SUCCESS", f"Face + LDAP authentication successful for {username}")
