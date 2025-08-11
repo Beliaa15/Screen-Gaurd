@@ -29,7 +29,7 @@ from ..core.config import Config
 from ..core.base import BaseAuthenticator
 from ..utils.security_utils import SecurityUtils
 from .ldap_auth import LDAPAuthenticator
-
+# first commit in new branch
 
 class DeepFaceAuthenticator(BaseAuthenticator):
     """Advanced face authentication using DeepFace library."""
