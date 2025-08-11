@@ -16,6 +16,9 @@ import subprocess
 import sys
 from pathlib import Path
 from typing import Dict, Optional, Tuple
+import cv2
+import numpy as np
+from PIL import Image, ImageTk
 
 from ..core.config import Config
 from ..utils.security_utils import SecurityUtils
@@ -43,6 +46,12 @@ class SecurityGUI:
         self.current_screen = None
         self.is_minimized = False
         self.detection_running = False
+        
+        # Camera and preview variables
+        self.camera_preview_active = False
+        self.camera_cap = None
+        self.preview_label = None
+        self.camera_thread_running = False
         
         # User management form variables
         self.username_var = tk.StringVar()
@@ -292,10 +301,139 @@ class SecurityGUI:
         
     def clear_screen(self):
         """Clear all widgets from the root window and maintain security properties."""
+        # Stop any active camera preview before clearing
+        self.stop_camera_preview()
+        
         for widget in self.root.winfo_children():
             widget.destroy()
         # Ensure security properties are maintained after clearing screen
         self.maintain_security_properties()
+    
+    def check_camera_available(self) -> bool:
+        """Check if camera is available (not in use by detection system)."""
+        if self.detection_running:
+            return False
+        return True
+    
+    def init_camera_preview(self, preview_label: tk.Label) -> bool:
+        """Initialize camera for preview display with timeout."""
+        if not self.check_camera_available():
+            return False
+            
+        if self.camera_cap is not None:
+            return True  # Already initialized
+            
+        try:
+            # Try initializing camera with timeout
+            import signal
+            
+            def timeout_handler(signum, frame):
+                raise TimeoutError("Camera initialization timeout")
+                
+            # Set up timeout (Windows doesn't support SIGALRM, so we'll use a different approach)
+            start_time = time.time()
+            
+            self.camera_cap = cv2.VideoCapture(Config.DEFAULT_CAMERA_INDEX)
+            
+            # Check if initialization took too long (simple timeout check)
+            if time.time() - start_time > Config.CAMERA_INIT_TIMEOUT:
+                print("Camera initialization timeout")
+                if self.camera_cap:
+                    self.camera_cap.release()
+                self.camera_cap = None
+                return False
+            
+            if not self.camera_cap.isOpened():
+                self.camera_cap = None
+                return False
+                
+            # Set camera properties using config values
+            self.camera_cap.set(cv2.CAP_PROP_FRAME_WIDTH, Config.CAMERA_PREVIEW_WIDTH)
+            self.camera_cap.set(cv2.CAP_PROP_FRAME_HEIGHT, Config.CAMERA_PREVIEW_HEIGHT)
+            self.camera_cap.set(cv2.CAP_PROP_FPS, Config.CAMERA_PREVIEW_FPS)
+            self.camera_cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
+            
+            # Test if we can actually read a frame
+            ret, test_frame = self.camera_cap.read()
+            if not ret or test_frame is None:
+                print("Camera opened but cannot read frames")
+                self.camera_cap.release()
+                self.camera_cap = None
+                return False
+            
+            self.preview_label = preview_label
+            return True
+            
+        except Exception as e:
+            print(f"Camera initialization error: {e}")
+            if self.camera_cap:
+                self.camera_cap.release()
+            self.camera_cap = None
+            return False
+    
+    def start_camera_preview(self):
+        """Start the camera preview thread."""
+        if not self.camera_cap or self.camera_thread_running:
+            return
+            
+        self.camera_thread_running = True
+        self.camera_preview_active = True
+        
+        def camera_thread():
+            frame_skip = 0
+            while self.camera_thread_running and self.camera_cap:
+                try:
+                    ret, frame = self.camera_cap.read()
+                    if not ret:
+                        continue
+                    
+                    # Skip frames to reduce CPU usage (process every 2nd frame)
+                    frame_skip += 1
+                    if frame_skip % 2 != 0:
+                        continue
+                        
+                    # Resize for display (smaller for better performance)
+                    display_width = 320
+                    display_height = 240
+                    frame = cv2.resize(frame, (display_width, display_height))
+                    
+                    # Convert BGR to RGB
+                    frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+                    
+                    # Convert to PIL Image and then to PhotoImage
+                    pil_image = Image.fromarray(frame_rgb)
+                    photo = ImageTk.PhotoImage(image=pil_image)
+                    
+                    # Update the preview label on main thread
+                    if self.preview_label and self.camera_preview_active:
+                        def update_preview():
+                            if self.preview_label and self.camera_preview_active:
+                                self.preview_label.configure(image=photo)
+                                self.preview_label.image = photo  # Keep a reference
+                        
+                        self.root.after(0, update_preview)
+                        
+                    # Dynamic sleep based on FPS setting
+                    time.sleep(1/Config.CAMERA_PREVIEW_FPS)
+                    
+                except Exception as e:
+                    print(f"Camera preview error: {e}")
+                    break
+                    
+            self.camera_thread_running = False
+            
+        threading.Thread(target=camera_thread, daemon=True).start()
+    
+    def stop_camera_preview(self):
+        """Stop camera preview and release resources."""
+        self.camera_preview_active = False
+        self.camera_thread_running = False
+        
+        if self.camera_cap:
+            self.camera_cap.release()
+            self.camera_cap = None
+            
+        self.preview_label = None
     
     def show_custom_dialog(self, title, message, dialog_type="info", input_field=False, password=False, callback=None):
         """Show a modern custom dialog within the GUI."""
@@ -519,12 +657,23 @@ class SecurityGUI:
         # Loading label with modern font
         self.loading_label = tk.Label(
             loading_card,
-            text="Initializing System...",
+            text="Initializing Security Components...",
             fg=self.colors['primary'],
             bg=self.colors['card'],
             font=("Segoe UI", 12, "normal")
         )
         self.loading_label.pack(pady=15)
+        
+        # Add component initialization status
+        self.component_status = tk.Label(
+            loading_card,
+            text="• Starting authentication systems\n• Loading AI models\n• Preparing camera interfaces",
+            fg=self.colors['on_surface'],
+            bg=self.colors['card'],
+            font=("Segoe UI", 10, "normal"),
+            justify='left'
+        )
+        self.component_status.pack(pady=(0, 10))
         
         # Modern progress indicator
         self.progress_frame = tk.Frame(loading_card, bg=self.colors['card'])
@@ -545,39 +694,81 @@ class SecurityGUI:
         
         # Start modern loading animation
         self.animate_modern_loading()
+        
+        # Show progressive loading status
+        self.show_startup_progress()
 
-        # Auto-proceed to login after 2.5 seconds
-        self.root.after(2500, self.show_login_screen)
+        # Auto-proceed to login after 3 seconds (increased for better UX)
+        self.root.after(3000, self.show_login_screen)
+    
+    def show_startup_progress(self):
+        """Show progressive startup status updates."""
+        progress_steps = [
+            ("Initializing Security Components...", "• Authentication systems ready\n• Loading AI models\n• Preparing camera interfaces"),
+            ("Loading AI Models...", "• DeepFace models loaded\n• Face recognition ready\n• Camera systems initialized"),
+            ("System Ready!", "• All components loaded\n• Security systems active\n• Ready for authentication")
+        ]
+        
+        def update_progress(step=0):
+            if step < len(progress_steps) and self.current_screen == "startup":
+                main_text, detail_text = progress_steps[step]
+                self.loading_label.config(text=main_text)
+                self.component_status.config(text=detail_text)
+                
+                # Schedule next update
+                if step < len(progress_steps) - 1:
+                    self.root.after(1000, lambda: update_progress(step + 1))
+        
+        # Start progress updates
+        self.root.after(500, update_progress)
         
     def animate_modern_loading(self):
         """Modern loading animation with color-changing dots."""
-        def update_dots():
-            for cycle in range(6):  # 6 animation cycles
-                for i in range(len(self.progress_dots)):
-                    # Reset all dots
-                    for dot in self.progress_dots:
-                        dot.config(fg=self.colors['border'])
-                    
-                    # Highlight current dot
-                    if i < len(self.progress_dots):
-                        self.progress_dots[i].config(fg=self.colors['accent'])
-                    
-                    time.sleep(0.3)
+        self.animation_cycle = 0
+        self.animation_step = 0
         
-        threading.Thread(target=update_dots, daemon=True).start()
+        def update_dots():
+            if self.current_screen != "startup" or self.animation_cycle >= 6:
+                return
+                
+            # Reset all dots
+            for dot in self.progress_dots:
+                dot.config(fg=self.colors['border'])
+            
+            # Highlight current dot
+            if self.animation_step < len(self.progress_dots):
+                self.progress_dots[self.animation_step].config(fg=self.colors['accent'])
+            
+            # Move to next step
+            self.animation_step += 1
+            if self.animation_step >= len(self.progress_dots):
+                self.animation_step = 0
+                self.animation_cycle += 1
+            
+            # Schedule next update on main thread
+            self.root.after(300, update_dots)
+        
+        # Start animation on main thread
+        self.root.after(100, update_dots)
         
     def animate_loading(self):
         """Animate loading dots."""
-        def update_dots():
-            for i in range(4):
-                if self.current_screen != "startup":
-                    return
-                dots = "." * i
-                self.progress_label.config(text=dots)
-                self.root.update_idletasks()
-                time.sleep(0.5)
+        self.loading_step = 0
         
-        threading.Thread(target=update_dots, daemon=True).start()
+        def update_dots():
+            if self.current_screen != "startup" or self.loading_step >= 4:
+                return
+                
+            if hasattr(self, 'progress_label'):
+                dots = "." * self.loading_step
+                self.progress_label.config(text=dots)
+            
+            self.loading_step += 1
+            # Schedule next update on main thread
+            self.root.after(500, update_dots)
+        
+        # Start animation on main thread
+        self.root.after(100, update_dots)
     
     def show_login_screen(self):
         """Show the modern login/authentication screen."""
@@ -620,7 +811,7 @@ class SecurityGUI:
         
         welcome_label = tk.Label(
             welcome_card,
-            text="Please select your authentication method to access the security system",
+            text="Face Recognition Security System\nPosition your face in front of the camera to access the system",
             fg=self.colors['on_surface'],
             bg=self.colors['card'],
             font=("Segoe UI", 14, "normal"),
@@ -630,11 +821,27 @@ class SecurityGUI:
         welcome_label.pack(pady=20, padx=30)
         
         # Authentication methods card - compact size
-        methods_card = self.create_modern_card(cards_frame, "Authentication Methods")
+        methods_card = self.create_modern_card(cards_frame, "Primary: Face Recognition")
         methods_card.pack(pady=10, padx=50)
         
         # Create modern authentication buttons
         self.create_modern_auth_buttons(methods_card)
+        
+        # Auto-start face recognition after 5 seconds
+        self.auto_start_timer = self.root.after(5000, lambda: self.auto_start_face_recognition())
+        
+        # Add countdown indicator
+        self.countdown_label = tk.Label(
+            cards_frame,
+            text="Face recognition will start automatically in 5 seconds...",
+            fg=self.colors['primary'],
+            bg=self.colors['background'],
+            font=("Segoe UI", 10, "italic")
+        )
+        self.countdown_label.pack(pady=(20, 0))
+        
+        # Start countdown animation
+        self.start_countdown_animation()
         
         # Footer with system info
         footer_frame = tk.Frame(main_frame, bg=self.colors['primary'], height=60)
@@ -653,7 +860,7 @@ class SecurityGUI:
         footer_label.pack(expand=True)
         
     def create_modern_auth_buttons(self, parent):
-        """Create modern authentication method buttons."""
+        """Create modern authentication method buttons with face recognition priority."""
         methods_frame = tk.Frame(parent, bg=self.colors['card'])
         methods_frame.pack(pady=20, padx=30)
         
@@ -661,95 +868,165 @@ class SecurityGUI:
         buttons_container = tk.Frame(methods_frame, bg=self.colors['card'])
         buttons_container.pack()
         
-        # Email & Password button with icon - compact width
-        email_frame = tk.Frame(buttons_container, bg=self.colors['success'], relief='flat', bd=0)
-        email_frame.pack(pady=10, fill='x')
+        # Primary Face Recognition button - larger and more prominent
+        primary_container = tk.Frame(buttons_container, bg=self.colors['card'])
+        primary_container.pack(pady=15, fill='x')
         
-        email_btn = tk.Button(
-            email_frame,
-            text="📧  Email & Password Authentication",
-            command=lambda: self.select_auth_method("email_password"),
-            font=("Segoe UI", 14, "bold"),
-            bg=self.colors['success'],
-            fg='white',
-            relief='flat',
-            bd=0,
-            padx=30,
-            pady=12,
-            cursor='hand2',
-            width=35
+        # Recommended badge
+        badge_frame = tk.Frame(primary_container, bg=self.colors['card'])
+        badge_frame.pack()
+        
+        badge_label = tk.Label(
+            badge_frame,
+            text="⭐ RECOMMENDED",
+            fg=self.colors['warning'],
+            bg=self.colors['card'],
+            font=("Segoe UI", 10, "bold")
         )
-        email_btn.pack()
+        badge_label.pack()
         
-        # Add hover effects
-        def on_enter_email(e):
-            email_btn.config(bg=self.colors['primary_light'])
-        def on_leave_email(e):
-            email_btn.config(bg=self.colors['success'])
-        
-        email_btn.bind("<Enter>", on_enter_email)
-        email_btn.bind("<Leave>", on_leave_email)
-        
-        # Fingerprint button - compact width
-        fingerprint_frame = tk.Frame(buttons_container, bg=self.colors['primary'], relief='flat', bd=0)
-        fingerprint_frame.pack(pady=10, fill='x')
-        
-        fingerprint_btn = tk.Button(
-            fingerprint_frame,
-            text="👆  Fingerprint Authentication",
-            command=lambda: self.select_auth_method("fingerprint"),
-            font=("Segoe UI", 14, "bold"),
-            bg=self.colors['primary'],
-            fg='white',
-            relief='flat',
-            bd=0,
-            padx=30,
-            pady=12,
-            cursor='hand2',
-            width=35
-        )
-        fingerprint_btn.pack()
-        
-        # Add hover effects
-        def on_enter_finger(e):
-            fingerprint_btn.config(bg=self.colors['primary_light'])
-        def on_leave_finger(e):
-            fingerprint_btn.config(bg=self.colors['primary'])
-        
-        fingerprint_btn.bind("<Enter>", on_enter_finger)
-        fingerprint_btn.bind("<Leave>", on_leave_finger)
-        
-        # DeepFace button - compact width
-        deepface_frame = tk.Frame(buttons_container, bg=self.colors['warning'], relief='flat', bd=0)
-        deepface_frame.pack(pady=10, fill='x')
+        deepface_frame = tk.Frame(primary_container, bg=self.colors['warning'], relief='flat', bd=0)
+        deepface_frame.pack(pady=(5, 0), fill='x')
         
         deepface_btn = tk.Button(
             deepface_frame,
-            text="🧠  Advanced Face Recognition",
+            text="🧠  FACE RECOGNITION LOGIN",
             command=lambda: self.select_auth_method("deepface"),
-            font=("Segoe UI", 14, "bold"),
+            font=("Segoe UI", 16, "bold"),
             bg=self.colors['warning'],
             fg='white',
             relief='flat',
             bd=0,
-            padx=30,
-            pady=12,
+            padx=40,
+            pady=20,
             cursor='hand2',
-            width=35
+            width=35,
+            activebackground=self.colors['primary_light']
         )
         deepface_btn.pack()
         
-        # Add hover effects
+        # Add prominent hover effects and click animation
         def on_enter_deep(e):
-            deepface_btn.config(bg=self.colors['primary_light'])
+            deepface_btn.config(bg=self.colors['primary_light'], font=("Segoe UI", 17, "bold"))
+            badge_label.config(fg=self.colors['primary_light'])
         def on_leave_deep(e):
-            deepface_btn.config(bg=self.colors['warning'])
+            deepface_btn.config(bg=self.colors['warning'], font=("Segoe UI", 16, "bold"))
+            badge_label.config(fg=self.colors['warning'])
+        def on_click_deep(e):
+            deepface_btn.config(bg=self.colors['secondary'])
+            self.root.after(100, lambda: deepface_btn.config(bg=self.colors['primary_light']))
         
         deepface_btn.bind("<Enter>", on_enter_deep)
         deepface_btn.bind("<Leave>", on_leave_deep)
+        deepface_btn.bind("<Button-1>", on_click_deep)
+        
+        # Add instruction text below main button
+        instruction_label = tk.Label(
+            buttons_container,
+            text="Primary authentication method - Position your face in front of the camera",
+            fg=self.colors['on_surface'],
+            bg=self.colors['card'],
+            font=("Segoe UI", 10, "italic")
+        )
+        instruction_label.pack(pady=(5, 20))
+        
+        # Alternative methods section - smaller and less prominent
+        alt_frame = tk.Frame(buttons_container, bg=self.colors['card'])
+        alt_frame.pack(pady=(10, 0))
+        
+        alt_label = tk.Label(
+            alt_frame,
+            text="Alternative Methods:",
+            fg=self.colors['on_surface'],
+            bg=self.colors['card'],
+            font=("Segoe UI", 10, "bold")
+        )
+        alt_label.pack(pady=(0, 10))
+        
+        # Fingerprint button - smaller
+        fingerprint_btn = tk.Button(
+            alt_frame,
+            text="👆 Fingerprint",
+            command=lambda: self.select_auth_method("fingerprint"),
+            font=("Segoe UI", 10, "normal"),
+            bg=self.colors['primary'],
+            fg='white',
+            relief='flat',
+            bd=0,
+            padx=15,
+            pady=8,
+            cursor='hand2',
+            width=20
+        )
+        fingerprint_btn.pack(pady=5)
+        
+        # Development access - small button in corner
+        dev_frame = tk.Frame(buttons_container, bg=self.colors['card'])
+        dev_frame.pack(side='bottom', anchor='se', pady=(30, 0))
+        
+        dev_btn = tk.Button(
+            dev_frame,
+            text="🔧",
+            command=lambda: self.select_auth_method("email_password"),
+            font=("Segoe UI", 8, "normal"),
+            bg=self.colors['border'],
+            fg=self.colors['on_surface'],
+            relief='flat',
+            bd=0,
+            padx=6,
+            pady=3,
+            cursor='hand2'
+        )
+        dev_btn.pack(side='right')
+        
+        # Dev button tooltip on hover - more discrete
+        def show_dev_tooltip(e):
+            dev_btn.config(text="Dev", bg=self.colors['dark'], fg='white')
+        def hide_dev_tooltip(e):
+            dev_btn.config(text="🔧", bg=self.colors['border'], fg=self.colors['on_surface'])
+        
+        dev_btn.bind("<Enter>", show_dev_tooltip)
+        dev_btn.bind("<Leave>", hide_dev_tooltip)
+    
+    def auto_start_face_recognition(self):
+        """Auto-start face recognition after countdown."""
+        if self.current_screen == "login":
+            self.select_auth_method("deepface")
+    
+    def start_countdown_animation(self):
+        """Start countdown animation for auto face recognition."""
+        self.countdown_seconds = 10
+        
+        def update_countdown():
+            if self.current_screen != "login" or self.countdown_seconds <= 0:
+                return
+            
+            self.countdown_label.config(text=f"Face recognition will start automatically in {self.countdown_seconds} seconds...")
+            self.countdown_seconds -= 1
+            
+            # Schedule next update
+            if self.countdown_seconds >= 0:
+                self.root.after(1000, update_countdown)
+            else:
+                # Hide countdown when done
+                if hasattr(self, 'countdown_label'):
+                    self.countdown_label.config(text="Starting face recognition...")
+        
+        # Start countdown
+        self.root.after(1000, update_countdown)
+    
+    def cancel_auto_start(self):
+        """Cancel the auto-start timer."""
+        if hasattr(self, 'auto_start_timer'):
+            self.root.after_cancel(self.auto_start_timer)
+        if hasattr(self, 'countdown_label'):
+            self.countdown_label.config(text="")
     
     def select_auth_method(self, method):
         """Handle authentication method selection."""
+        # Cancel auto-start timer when user makes manual selection
+        self.cancel_auto_start()
+        
         if method == "email_password":  # Keep the same method name for compatibility
             self.show_domain_auth_form()
         elif method == "fingerprint":
@@ -759,7 +1036,7 @@ class SecurityGUI:
     
     def show_method_selection(self):
         """Show method selection screen."""
-        self.show_login_screen()
+        self.show_login_screen()  # This will restart the auto-start timer
     
     def show_domain_auth_form(self):
         """Show modern domain authentication form."""
@@ -1041,7 +1318,7 @@ class SecurityGUI:
         threading.Thread(target=auth_thread, daemon=True).start()
     
     def show_deepface_auth(self):
-        """Show DeepFace authentication screen."""
+        """Show DeepFace authentication screen with live camera preview."""
         self.clear_screen()
         self.current_screen = "deepface"
         
@@ -1063,19 +1340,53 @@ class SecurityGUI:
         )
         title_label.pack(expand=True)
         
-        # Center container - compact design
+        # Center container with two-column layout
         center_container = tk.Frame(main_frame, bg=self.colors['background'])
-        center_container.pack(expand=True, fill='both')
+        center_container.pack(expand=True, fill='both', padx=50, pady=20)
         
-        # Authentication card - centered with pack
-        auth_frame = tk.Frame(center_container, bg=self.colors['background'])
-        auth_frame.pack(expand=True)
+        # Left side - Camera preview
+        left_frame = tk.Frame(center_container, bg=self.colors['background'])
+        left_frame.pack(side='left', fill='both', expand=True, padx=(0, 25))
         
-        auth_card = self.create_modern_card(auth_frame, "AI Face Recognition")
-        auth_card.pack(pady=50, padx=100)
+        camera_card = self.create_modern_card(left_frame, "Live Camera Feed")
+        camera_card.pack(fill='both', expand=True)
+        
+        camera_content = tk.Frame(camera_card, bg=self.colors['card'])
+        camera_content.pack(expand=True, fill='both', padx=20, pady=20)
+        
+        # Camera preview label
+        self.camera_preview_label = tk.Label(
+            camera_content,
+            text="📹\nInitializing Camera...",
+            fg=self.colors['on_surface'],
+            bg=self.colors['surface'],
+            font=("Segoe UI", 16, "normal"),
+            width=40,
+            height=15,
+            relief='solid',
+            bd=1
+        )
+        self.camera_preview_label.pack(expand=True, fill='both')
+        
+        # Camera status
+        self.camera_status_label = tk.Label(
+            camera_content,
+            text="Setting up camera preview...",
+            fg=self.colors['warning'],
+            bg=self.colors['card'],
+            font=("Segoe UI", 10, "normal")
+        )
+        self.camera_status_label.pack(pady=(10, 0))
+        
+        # Right side - Authentication info
+        right_frame = tk.Frame(center_container, bg=self.colors['background'])
+        right_frame.pack(side='right', fill='both', expand=True, padx=(25, 0))
+        
+        auth_card = self.create_modern_card(right_frame, "AI Authentication")
+        auth_card.pack(fill='both', expand=True)
         
         auth_content = tk.Frame(auth_card, bg=self.colors['card'])
-        auth_content.pack(padx=50, pady=30)
+        auth_content.pack(expand=True, fill='both', padx=30, pady=30)
         
         # DeepFace icon
         self.deepface_icon = tk.Label(
@@ -1083,17 +1394,17 @@ class SecurityGUI:
             text="🧠",
             fg=self.colors['warning'],
             bg=self.colors['card'],
-            font=("Segoe UI", 80, "bold")
+            font=("Segoe UI", 60, "bold")
         )
-        self.deepface_icon.pack(pady=(20, 30))
+        self.deepface_icon.pack(pady=(10, 20))
         
         # Instructions
         instructions_label = tk.Label(
             auth_content,
-            text="Look directly at the camera\nAdvanced AI processing - please be patient\nEnsure good lighting and clear face visibility",
+            text="Look directly at the camera\n\nAdvanced AI processing\nEnsure good lighting and\nclear face visibility",
             fg=self.colors['on_surface'],
             bg=self.colors['card'],
-            font=("Segoe UI", 16, "normal"),
+            font=("Segoe UI", 14, "normal"),
             justify='center'
         )
         instructions_label.pack(pady=(0, 20))
@@ -1104,19 +1415,20 @@ class SecurityGUI:
             text="Initializing AI models...",
             fg=self.colors['warning'],
             bg=self.colors['card'],
-            font=("Segoe UI", 14, "bold")
+            font=("Segoe UI", 12, "bold"),
+            wraplength=250
         )
         self.deepface_status.pack(pady=10)
         
         # Buttons frame
         buttons_frame = tk.Frame(auth_content, bg=self.colors['card'])
-        buttons_frame.pack(pady=(30, 0))
+        buttons_frame.pack(side='bottom', pady=(20, 0))
         
         # Cancel button
         cancel_btn = tk.Button(
             buttons_frame,
             text="← Cancel",
-            command=self.show_method_selection,
+            command=self.cancel_deepface_auth,
             font=("Segoe UI", 14, "bold"),
             bg=self.colors['dark'],
             fg='white',
@@ -1128,22 +1440,94 @@ class SecurityGUI:
         )
         cancel_btn.pack()
         
-        # Start authentication process
-        self.root.after(0, self.attempt_deepface_login)
+        # Check camera availability and start preview
+        self.root.after(100, self.init_deepface_camera_async)
+    
+    def init_deepface_camera_async(self):
+        """Initialize DeepFace camera asynchronously to avoid blocking UI."""
+        def camera_init_thread():
+            try:
+                if self.check_camera_available():
+                    camera_ready = self.init_camera_preview(self.camera_preview_label)
+                    if camera_ready:
+                        self.root.after(0, lambda: self.camera_status_label.config(
+                            text="Camera active - Position your face in view", fg=self.colors['success']))
+                        self.root.after(0, self.start_camera_preview)
+                        # Start authentication process after camera is ready
+                        self.root.after(500, self.attempt_deepface_login)
+                    else:
+                        self.root.after(0, lambda: self.camera_status_label.config(
+                            text="Camera unavailable - Using fallback mode", fg=self.colors['danger']))
+                        self.root.after(0, lambda: self.camera_preview_label.config(
+                            text="📹\nCamera Not Available\n\nUsing fallback authentication", 
+                            font=("Segoe UI", 12, "normal")))
+                        # Still attempt authentication without preview
+                        self.root.after(500, self.attempt_deepface_login)
+                else:
+                    self.root.after(0, lambda: self.camera_status_label.config(
+                        text="Camera in use by detection system", fg=self.colors['danger']))
+                    self.root.after(0, lambda: self.camera_preview_label.config(
+                        text="📹\nCamera In Use\n\nDetection system is active\nStop detection to use camera preview", 
+                        font=("Segoe UI", 11, "normal")))
+                    # Show information dialog about camera conflict
+                    self.root.after(2000, lambda: self.show_custom_dialog(
+                        "Camera Resource Conflict",
+                        "The camera is currently being used by the detection system.\n\nYou can:\n• Stop detection to enable camera preview\n• Continue with fallback authentication mode\n\nFallback mode will use the DeepFace library's built-in camera handling.",
+                        "warning"
+                    ))
+                    # Still attempt authentication without preview
+                    self.root.after(500, self.attempt_deepface_login)
+            except Exception as e:
+                print(f"Camera initialization error: {e}")
+                self.root.after(0, lambda: self.camera_status_label.config(
+                    text="Camera initialization failed", fg=self.colors['danger']))
+                # Still attempt authentication without preview
+                self.root.after(500, self.attempt_deepface_login)
+        
+        # Start camera initialization in background
+        threading.Thread(target=camera_init_thread, daemon=True).start()
+    
+    def cancel_deepface_auth(self):
+        """Cancel DeepFace authentication and return to method selection."""
+        self.stop_camera_preview()
+        self.show_method_selection()
     
     def attempt_deepface_login(self):
-        """Attempt DeepFace authentication."""
+        """Attempt DeepFace authentication with GUI integration."""
         if self.current_screen != "deepface":
             return
             
-        self.deepface_status.config(text="Scanning with AI models...")
+        # Start with initializing models
+        self.deepface_status.config(text="Initializing AI models...", fg=self.colors['warning'])
         
         def auth_thread():
             try:
-                result = self.deepface_auth.authenticate_face(timeout=30)
+                # Check if DeepFace is available first
+                if not self.deepface_auth.is_available():
+                    self.root.after(0, lambda: self.deepface_status.config(
+                        text="DeepFace library not available", fg=self.colors['danger']))
+                    self.root.after(0, lambda: self.handle_auth_result(
+                        False, None, "deepface", "DeepFace library not installed"))
+                    return
+                
+                # Update status to scanning
+                self.root.after(0, lambda: self.deepface_status.config(
+                    text="AI models ready - Scanning faces...", fg=self.colors['primary']))
+                
+                # Use the GUI's camera if available, otherwise fall back to DeepFace's method
+                if self.camera_cap and self.camera_preview_active:
+                    result = self.authenticate_face_with_gui_camera(timeout=30)
+                else:
+                    self.root.after(0, lambda: self.deepface_status.config(
+                        text="Using fallback camera mode...", fg=self.colors['warning']))
+                    result = self.deepface_auth.authenticate_face(timeout=30)
+                    
                 if result:
                     username = result['username']
                     role = result.get('role', 'user')
+                    
+                    # Stop camera preview on successful authentication
+                    self.root.after(0, self.stop_camera_preview)
                     
                     # Check if password is required for LDAP authentication
                     if result.get('requires_password') or (result.get('password_hash') and result.get('salt')):
@@ -1153,15 +1537,30 @@ class SecurityGUI:
                         # Face authentication only (no stored password)
                         self.root.after(0, lambda: self.handle_auth_result(True, username, "deepface", role))
                 else:
+                    self.root.after(0, lambda: self.deepface_status.config(
+                        text="No matching face found", fg=self.colors['danger']))
                     self.root.after(0, lambda: self.handle_auth_result(False, None, "deepface", "Face not recognized by AI"))
             except Exception as e:
                 error_msg = f"DeepFace authentication error: {str(e)}"
+                self.root.after(0, lambda: self.deepface_status.config(
+                    text="Authentication error occurred", fg=self.colors['danger']))
                 self.root.after(0, lambda: self.handle_auth_result(False, None, "deepface", error_msg))
         
         threading.Thread(target=auth_thread, daemon=True).start()
     
+    def authenticate_face_with_gui_camera(self, timeout: int = 30):
+        """Authenticate using the GUI's camera preview for integration."""
+        if not self.camera_cap:
+            return None
+            
+        # Use the new external camera method from DeepFaceAuthenticator
+        return self.deepface_auth.authenticate_face_with_external_camera(self.camera_cap, timeout)
+    
     def prompt_password_for_ldap(self, username, face_result):
         """Prompt for password after successful face recognition for LDAP authentication."""
+        # Stop camera preview since face recognition was successful
+        self.stop_camera_preview()
+        
         self.clear_screen()
         self.current_screen = "password_prompt"
         
@@ -1350,6 +1749,9 @@ class SecurityGUI:
     
     def handle_auth_result(self, success, username, method, role_or_error):
         """Handle authentication result."""
+        # Always stop camera preview when authentication completes
+        self.stop_camera_preview()
+        
         if success:
             self.show_auth_success(username, role_or_error)
         else:
@@ -2376,32 +2778,164 @@ class SecurityGUI:
     
     # User Registration Methods
     def register_user_camera_unified(self):
-        """Register a user and their face using camera."""
+        """Register a user and their face using camera with preview."""
         if not self.validate_user_info():
             return
             
         user_info = self.get_user_info()
-        self.log_user_mgmt_message(f"Starting user registration for: {user_info['username']}")
         
-        try:
-            # Use the unified registration method from DeepFace with camera
-            success, message = self.deepface_auth.create_ldap_user_with_face(
-                username=user_info['username'],
-                first_name=user_info['first_name'],
-                last_name=user_info['last_name'],
-                email=user_info['email'],
-                role=user_info['role']
-            )
+        # Check camera availability before starting
+        if not self.check_camera_available():
+            self.log_user_mgmt_message("ERROR: Camera is not available. Detection system may be running.", "error")
+            self.show_custom_dialog("Camera Unavailable", 
+                                   "Camera is currently in use by the detection system.\nPlease stop detection before registering faces.", 
+                                   "error")
+            return
+        
+        # Show camera preview dialog for registration
+        self.show_camera_registration_dialog(user_info)
+    
+    def show_camera_registration_dialog(self, user_info):
+        """Show camera registration dialog with live preview."""
+        # Create modern overlay
+        self.registration_overlay = tk.Frame(self.root, bg='#000000')
+        self.registration_overlay.place(x=0, y=0, relwidth=1, relheight=1)
+        self.registration_overlay.configure(bg='#404040')
+        
+        # Registration dialog frame
+        dialog_frame = tk.Frame(self.registration_overlay, bg=self.colors['card'], relief='flat', bd=0)
+        dialog_frame.place(relx=0.5, rely=0.5, anchor='center', width=800, height=600)
+        
+        # Header
+        header_frame = tk.Frame(dialog_frame, bg=self.colors['primary'], height=60)
+        header_frame.pack(fill='x')
+        header_frame.pack_propagate(False)
+        
+        title_label = tk.Label(header_frame, text=f"📷 Face Registration - {user_info['username']}", 
+                              bg=self.colors['primary'], fg='white',
+                              font=("Segoe UI", 16, "bold"))
+        title_label.pack(expand=True)
+        
+        # Content area with two columns
+        content_frame = tk.Frame(dialog_frame, bg=self.colors['card'])
+        content_frame.pack(fill='both', expand=True, padx=20, pady=20)
+        
+        # Left side - Camera preview
+        left_frame = tk.Frame(content_frame, bg=self.colors['card'])
+        left_frame.pack(side='left', fill='both', expand=True, padx=(0, 10))
+        
+        preview_label = tk.Label(left_frame, text="Camera Preview", 
+                                bg=self.colors['card'], fg=self.colors['on_surface'],
+                                font=("Segoe UI", 12, "bold"))
+        preview_label.pack()
+        
+        self.reg_camera_preview = tk.Label(left_frame, text="📹\nInitializing Camera...", 
+                                          fg=self.colors['on_surface'], bg=self.colors['surface'],
+                                          font=("Segoe UI", 14, "normal"), width=40, height=20,
+                                          relief='solid', bd=1)
+        self.reg_camera_preview.pack(pady=10, fill='both', expand=True)
+        
+        # Right side - Instructions and controls
+        right_frame = tk.Frame(content_frame, bg=self.colors['card'])
+        right_frame.pack(side='right', fill='both', expand=True, padx=(10, 0))
+        
+        instructions_label = tk.Label(right_frame, 
+                                     text="Face Registration Instructions:\n\n1. Position your face in the camera preview\n2. Ensure good lighting\n3. Look directly at the camera\n4. Keep your face stable\n5. Click 'Capture' when ready", 
+                                     bg=self.colors['card'], fg=self.colors['on_surface'],
+                                     font=("Segoe UI", 11, "normal"), justify='left')
+        instructions_label.pack(pady=(0, 20))
+        
+        # Status label
+        self.reg_status_label = tk.Label(right_frame, text="Initializing camera...", 
+                                        bg=self.colors['card'], fg=self.colors['warning'],
+                                        font=("Segoe UI", 12, "bold"))
+        self.reg_status_label.pack(pady=10)
+        
+        # Buttons
+        buttons_frame = tk.Frame(right_frame, bg=self.colors['card'])
+        buttons_frame.pack(side='bottom', pady=(20, 0))
+        
+        capture_btn = tk.Button(buttons_frame, text="📷 Capture & Register", 
+                               command=lambda: self.capture_and_register(user_info),
+                               font=("Segoe UI", 12, "bold"), bg=self.colors['success'], fg='white',
+                               relief='flat', bd=0, padx=20, pady=10, cursor='hand2')
+        capture_btn.pack(pady=5, fill='x')
+        
+        cancel_btn = tk.Button(buttons_frame, text="❌ Cancel", 
+                              command=self.close_registration_dialog,
+                              font=("Segoe UI", 12, "bold"), bg=self.colors['dark'], fg='white',
+                              relief='flat', bd=0, padx=20, pady=10, cursor='hand2')
+        cancel_btn.pack(pady=5, fill='x')
+        
+        # Start camera preview
+        if self.init_camera_preview(self.reg_camera_preview):
+            self.start_camera_preview()
+            self.reg_status_label.config(text="Camera active - Position your face", fg=self.colors['success'])
+        else:
+            self.reg_status_label.config(text="Camera initialization failed", fg=self.colors['danger'])
+    
+    def capture_and_register(self, user_info):
+        """Capture current frame and register user."""
+        if not self.camera_cap:
+            self.reg_status_label.config(text="Camera not available", fg=self.colors['danger'])
+            return
             
-            if success:
-                self.log_user_mgmt_message(f"SUCCESS: {message}", "success")
-                self.refresh_user_list_unified()
-                self.clear_user_form()
-            else:
-                self.log_user_mgmt_message(f"ERROR: {message}", "error")
-                
+        try:
+            # Capture current frame
+            ret, frame = self.camera_cap.read()
+            if not ret:
+                self.reg_status_label.config(text="Failed to capture image", fg=self.colors['danger'])
+                return
+            
+            self.reg_status_label.config(text="Processing with AI...", fg=self.colors['warning'])
+            
+            # Save temporary image
+            import tempfile
+            with tempfile.NamedTemporaryFile(suffix='.jpg', delete=False) as temp_file:
+                temp_path = temp_file.name
+                cv2.imwrite(temp_path, frame)
+            
+            # Close the dialog and stop camera
+            self.close_registration_dialog()
+            
+            # Register user with captured image
+            def register_thread():
+                try:
+                    success, message = self.deepface_auth.create_ldap_user_with_face(
+                        username=user_info['username'],
+                        first_name=user_info['first_name'],
+                        last_name=user_info['last_name'],
+                        email=user_info['email'],
+                        role=user_info['role'],
+                        image_path=temp_path
+                    )
+                    
+                    # Clean up temp file
+                    os.unlink(temp_path)
+                    
+                    if success:
+                        self.root.after(0, lambda: self.log_user_mgmt_message(f"SUCCESS: {message}", "success"))
+                        self.root.after(0, self.refresh_user_list_unified)
+                        self.root.after(0, self.clear_user_form)
+                    else:
+                        self.root.after(0, lambda: self.log_user_mgmt_message(f"ERROR: {message}", "error"))
+                        
+                except Exception as e:
+                    # Clean up temp file on error
+                    if os.path.exists(temp_path):
+                        os.unlink(temp_path)
+                    self.root.after(0, lambda: self.log_user_mgmt_message(f"Registration error: {str(e)}", "error"))
+            
+            threading.Thread(target=register_thread, daemon=True).start()
+            
         except Exception as e:
-            self.log_user_mgmt_message(f"Registration error: {str(e)}", "error")
+            self.reg_status_label.config(text=f"Error: {str(e)}", fg=self.colors['danger'])
+    
+    def close_registration_dialog(self):
+        """Close the registration dialog and clean up camera."""
+        self.stop_camera_preview()
+        if hasattr(self, 'registration_overlay'):
+            self.registration_overlay.destroy()
     
     def register_user_image_unified(self):
         """Register a user and their face using selected image."""
@@ -2523,6 +3057,7 @@ class SecurityGUI:
         try:
             result = self.deepface_auth.authenticate_face(timeout=10)
             if result:
+                # TODO: Fix unknown username issue
                 username = result.get('username', 'Unknown')
                 self.log_user_mgmt_message(f"SUCCESS: DeepFace authentication successful! User: {username}", "success")
             else:

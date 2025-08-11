@@ -559,6 +559,68 @@ class DeepFaceAuthenticator(BaseAuthenticator):
         face_result['requires_password'] = True
         return face_result
 
+    def authenticate_face_with_external_camera(self, camera_cap, timeout: int = 30) -> Optional[Dict[str, any]]:
+        """Authenticate using face recognition with an external camera handle."""
+        if not DEEPFACE_AVAILABLE or not camera_cap:
+            return None
+        
+        print(f"Face authentication started with external camera. Timeout: {timeout} seconds")
+        start_time = time.time()
+        
+        frame_count = 0
+        while True:
+            ret, frame = camera_cap.read()
+            if not ret:
+                break
+            
+            # Check timeout
+            elapsed = time.time() - start_time
+            if elapsed > timeout:
+                print("Face authentication timed out")
+                break
+            
+            frame_count += 1
+            
+            # Only process every 5th frame for performance
+            if frame_count % 5 != 0:
+                time.sleep(0.1)
+                continue
+            
+            try:
+                # Extract face embedding from current frame
+                embedding, confidence = self.extract_face_embedding(frame)
+                
+                if embedding is None or confidence < self.confidence_threshold:
+                    continue
+                
+                # Search for matching face in database
+                match_result = self.find_face_match(embedding)
+                
+                if match_result:
+                    # Face authentication successful
+                    username = match_result['username']
+                    password_hash = match_result.get('password_hash')
+                    salt = match_result.get('salt')
+                    
+                    if password_hash and salt:
+                        SecurityUtils.log_security_event("DEEPFACE_AUTH_SUCCESS", 
+                                                       f"Face authentication successful for: {username}")
+                        return match_result
+                    else:
+                        print(f"No stored credentials for {username}")
+                        SecurityUtils.log_security_event("DEEPFACE_AUTH_SUCCESS", 
+                                                       f"Face authentication successful for: {username} (no stored credentials)")
+                        return match_result
+                
+                time.sleep(0.2)  # Brief pause between checks
+                
+            except Exception as e:
+                print(f"Error during face authentication: {e}")
+                continue
+        
+        SecurityUtils.log_security_event("DEEPFACE_AUTH_FAILED", "Face authentication failed or timed out")
+        return None
+
     def authenticate_user_with_stored_password(self, username: str, entered_password: str) -> Optional[Dict[str, any]]:
         """Authenticate user by verifying stored password and then LDAP."""
         try:
@@ -875,3 +937,6 @@ class DeepFaceAuthenticator(BaseAuthenticator):
             
         except Exception as e:
             return False, f"Error updating password: {str(e)}"
+
+
+    # TODO: add delete_user method

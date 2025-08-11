@@ -68,14 +68,21 @@ class Config:
     PRINT_SCREEN_DETECTION_MESSAGE = "Print Screen Capture"
     SNIPPING_TOOL_DETECTION_MESSAGE = "Snipping Tool Hotkey"
     
+    # Camera Preview Settings
+    CAMERA_PREVIEW_WIDTH = 640
+    CAMERA_PREVIEW_HEIGHT = 480
+    CAMERA_PREVIEW_FPS = 15
+    CAMERA_INIT_TIMEOUT = 5  # seconds
+    
     @classmethod
     def ensure_directories(cls):
         """Ensure required directories exist."""
         Path(cls.MODELS_DIR).mkdir(exist_ok=True)
         Path(cls.LOGS_DIR).mkdir(exist_ok=True)
+        Path(cls.FACE_IMAGES_DIR).mkdir(exist_ok=True)
 
     # LDAP Configuration
-    LDAP_SERVER = "ldap://192.168.1.4"  
+    LDAP_SERVER = "ldap://192.168.1.26"
     LDAP_BASE_DN = "security-local.com"    
     LDAP_DOMAIN = "security-local"  # Domain for NTLM authentication
     LDAP_ADMIN_GROUP = "SecurityAdmins"
