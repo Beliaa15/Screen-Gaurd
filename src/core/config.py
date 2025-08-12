@@ -82,8 +82,11 @@ class Config:
         Path(cls.FACE_IMAGES_DIR).mkdir(exist_ok=True)
 
     # LDAP Configuration
-    LDAP_SERVER = "ldap://192.168.1.26"
-    LDAP_BASE_DN = "security-local.com"    
+    LDAP_SERVER = "ldaps://192.168.1.5"  # Use LDAPS since it's working
+    LDAP_USE_SSL = True  # Enable SSL since LDAPS is working
+    LDAP_SSL_PORT = 636  # Standard LDAPS port
+    LDAP_VERIFY_SSL = False  # Don't verify self-signed certificates
+    LDAP_BASE_DN = "SECURITY-LOCAL.com"    
     LDAP_DOMAIN = "security-local"  # Domain for NTLM authentication
     LDAP_ADMIN_GROUP = "SecurityAdmins"
     LDAP_OPERATOR_GROUP = "SecurityOperators"
@@ -94,11 +97,11 @@ class Config:
     LDAP_OPERATOR_OU = "OU=SecuritySystem,DC=security-local,DC=com"  # OU for operator users  
     LDAP_USER_OU = "OU=SecuritySystem,DC=security-local,DC=com"  # OU for regular users
     
-    # LDAP Admin Credentials (for user creation operations)
-    LDAP_ADMIN_USER = "administrator"  # Admin username
-    LDAP_ADMIN_PASSWORD = "Admin12345"  # Admin password - CHANGE THIS!
-    LDAP_ADMIN_DN = "CN=administrator,CN=Users,DC=security-local,DC=com"  # Full admin DN
-    
+    # LDAP Admin Credentials (for user creation operations) - WORKING CREDENTIALS
+    LDAP_ADMIN_USER = "secadmin"  # Working admin username from test
+    LDAP_ADMIN_PASSWORD = "Aa12345@"  # Working admin password from test
+    LDAP_ADMIN_DN = "CN=secadmin,CN=Users,DC=security-local,DC=com"  # Working admin DN
+
     # NTLM Authentication Settings
     NTLM_DOMAIN = "security-local"  # Default domain for NTLM
     REQUIRE_DOMAIN_IN_USERNAME = False  # Require domain\username format
