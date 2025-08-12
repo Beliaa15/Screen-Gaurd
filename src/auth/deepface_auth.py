@@ -234,6 +234,140 @@ class DeepFaceAuthenticator(BaseAuthenticator):
         except Exception as e:
             return False, f"Camera check failed: {str(e)}"
 
+    def check_face_duplicate_from_image(self, image_path: str = None, exclude_username: str = None) -> Tuple[bool, str, Optional[Dict]]:
+        """
+        Check if an image contains a face that's already registered.
+        
+        Args:
+            image_path: Path to image file, or None to capture from camera
+            exclude_username: Username to exclude from duplicate check
+            
+        Returns:
+            Tuple of (is_duplicate, message, duplicate_info)
+        """
+        if not DEEPFACE_AVAILABLE:
+            return False, "DeepFace not available", None
+        
+        try:
+            if image_path and os.path.exists(image_path):
+                # Load from image file
+                image = cv2.imread(image_path)
+                if image is None:
+                    return False, f"Could not load image from {image_path}", None
+            else:
+                # Capture from camera
+                image = self.capture_face_from_camera()
+                if image is None:
+                    return False, "Face capture cancelled or failed", None
+            
+            # Extract face embedding
+            embedding, confidence = self.extract_face_embedding(image)
+            
+            if embedding is None:
+                return False, "No face found in the image", None
+            
+            if confidence < self.confidence_threshold:
+                return False, f"Face confidence ({confidence:.2f}) too low for reliable duplicate checking", None
+            
+            # Check for duplicates
+            duplicate_check = self.check_face_duplicate(embedding, exclude_username)
+            
+            if duplicate_check:
+                duplicate_user = duplicate_check['duplicate_username']
+                duplicate_name = f"{duplicate_check['duplicate_first_name']} {duplicate_check['duplicate_last_name']}".strip()
+                similarity = duplicate_check['similarity_percentage']
+                
+                message = f"Face matches existing user '{duplicate_user}'"
+                if duplicate_name:
+                    message += f" ({duplicate_name})"
+                message += f" with {similarity:.1f}% similarity"
+                
+                return True, message, duplicate_check
+            else:
+                return False, "No duplicate face found", None
+                
+        except Exception as e:
+            return False, f"Error checking for duplicates: {str(e)}", None
+
+    def register_face_with_duplicate_check(self, username: str, first_name: str = "", last_name: str = "", 
+                                          email: str = "", role: str = "user", password: str = "", 
+                                          image_path: str = None) -> Tuple[bool, str, Optional[Dict]]:
+        """
+        Register a face with comprehensive duplicate checking and detailed error reporting.
+        
+        Args:
+            username: Username for the new user
+            first_name: First name of the user
+            last_name: Last name of the user
+            email: Email address of the user
+            role: Role/group for the user
+            password: Password for the user
+            image_path: Path to face image, or None to capture from camera
+            
+        Returns:
+            Tuple of (success, message, duplicate_info)
+            - success: Boolean indicating if registration was successful
+            - message: Success message or error description
+            - duplicate_info: Dictionary with duplicate user details if found, None otherwise
+        """
+        if not DEEPFACE_AVAILABLE:
+            return False, "DeepFace not available", None
+        
+        if not password:
+            return False, "Password is required for face registration", None
+        
+        try:
+            if image_path and os.path.exists(image_path):
+                # Load from image file
+                image = cv2.imread(image_path)
+                if image is None:
+                    return False, f"Could not load image from {image_path}", None
+            else:
+                # Capture from camera
+                image = self.capture_face_from_camera()
+                if image is None:
+                    return False, "Face capture cancelled or failed", None
+            
+            # Extract face embedding
+            embedding, confidence = self.extract_face_embedding(image)
+            
+            if embedding is None:
+                return False, "No face found in the image", None
+            
+            if confidence < self.confidence_threshold:
+                return False, f"Face confidence ({confidence:.2f}) below threshold ({self.confidence_threshold}). Please ensure good lighting and clear face visibility.", None
+            
+            # Check for face duplicates before registration
+            duplicate_check = self.check_face_duplicate(embedding, exclude_username=username)
+            if duplicate_check:
+                duplicate_user = duplicate_check['duplicate_username']
+                duplicate_name = f"{duplicate_check['duplicate_first_name']} {duplicate_check['duplicate_last_name']}".strip()
+                similarity = duplicate_check['similarity_percentage']
+                
+                error_msg = f"Face already registered to user '{duplicate_user}'"
+                if duplicate_name:
+                    error_msg += f" ({duplicate_name})"
+                error_msg += f" with {similarity:.1f}% similarity."
+                
+                SecurityUtils.log_security_event("DEEPFACE_DUPLICATE_DETECTED", 
+                                               f"Duplicate face detected for {username}: already registered to {duplicate_user}")
+                
+                return False, error_msg, duplicate_check
+            
+            # Proceed with registration using the original method
+            success = self.register_face(username, first_name, last_name, email, role, password, image_path)
+            
+            if success:
+                return True, f"Face registered successfully for {username}", None
+            else:
+                return False, "Face registration failed due to technical error", None
+                
+        except Exception as e:
+            error_msg = f"Error during face registration: {str(e)}"
+            SecurityUtils.log_security_event("DEEPFACE_REGISTRATION_ERROR", 
+                                           f"Face registration failed for {username}: {e}")
+            return False, error_msg, None
+
     def register_face(self, username: str, first_name: str = "", last_name: str = "", 
                      email: str = "", role: str = "user", password: str = "", image_path: str = None) -> bool:
         """Register a face for the given user with encrypted password."""
@@ -267,6 +401,23 @@ class DeepFaceAuthenticator(BaseAuthenticator):
             
             if confidence < self.confidence_threshold:
                 print(f"Face confidence ({confidence:.2f}) below threshold ({self.confidence_threshold})")
+                return False
+            
+            # Check for face duplicates before registration
+            duplicate_check = self.check_face_duplicate(embedding, exclude_username=username)
+            if duplicate_check:
+                duplicate_user = duplicate_check['duplicate_username']
+                duplicate_name = f"{duplicate_check['duplicate_first_name']} {duplicate_check['duplicate_last_name']}".strip()
+                similarity = duplicate_check['similarity_percentage']
+                
+                error_msg = f"Face already registered to user '{duplicate_user}'"
+                if duplicate_name:
+                    error_msg += f" ({duplicate_name})"
+                error_msg += f" with {similarity:.1f}% similarity. Cannot register duplicate face."
+                
+                print(error_msg)
+                SecurityUtils.log_security_event("DEEPFACE_DUPLICATE_DETECTED", 
+                                               f"Duplicate face detected for {username}: already registered to {duplicate_user}")
                 return False
             
             # Convert image to binary for storage
@@ -644,7 +795,8 @@ class DeepFaceAuthenticator(BaseAuthenticator):
                 return None
 
             # Now try LDAP authentication
-            if self._authenticate_with_ldap(username, entered_password):
+            ldap_success, ldap_result = self._authenticate_with_ldap(username, entered_password)
+            if ldap_success:
                 user_data = {
                     'username': username,
                     'first_name': first_name or '',
@@ -656,12 +808,81 @@ class DeepFaceAuthenticator(BaseAuthenticator):
                 SecurityUtils.log_security_event("AUTH_SUCCESS", f"Face + LDAP authentication successful for {username}")
                 return user_data
             else:
-                SecurityUtils.log_security_event("LDAP_AUTH_FAILED", f"LDAP authentication failed for {username}")
+                error_msg = ldap_result if isinstance(ldap_result, str) else "LDAP authentication failed"
+                SecurityUtils.log_security_event("LDAP_AUTH_FAILED", f"LDAP authentication failed for {username}: {error_msg}")
                 return None
                 
         except Exception as e:
             print(f"Error in authenticate_user_with_stored_password: {e}")
             SecurityUtils.log_security_event("AUTH_ERROR", f"Authentication error for {username}: {str(e)}")
+            return None
+
+    def check_face_duplicate(self, query_embedding: List[float], exclude_username: str = None) -> Optional[Dict[str, any]]:
+        """
+        Check if a face embedding matches any existing registered face.
+        
+        Args:
+            query_embedding: Face embedding to check for duplicates
+            exclude_username: Username to exclude from duplicate check (for updates)
+            
+        Returns:
+            Dictionary with duplicate user info if found, None if no duplicate
+        """
+        try:
+            conn = sqlite3.connect(self.db_path)
+            cursor = conn.cursor()
+            
+            # Get all face embeddings from database, excluding the specified user if updating
+            if exclude_username:
+                cursor.execute("SELECT username, first_name, last_name, embedding FROM faces WHERE username != ?", (exclude_username,))
+            else:
+                cursor.execute("SELECT username, first_name, last_name, embedding FROM faces")
+            faces = cursor.fetchall()
+            conn.close()
+            
+            if not faces:
+                return None
+            
+            query_embedding = np.array(query_embedding)
+            
+            # Use stricter thresholds for duplicate detection
+            duplicate_euclidean_threshold = 0.8  # Much stricter than authentication threshold
+            duplicate_cosine_threshold = 0.05     # Much stricter than authentication threshold
+            
+            for username, first_name, last_name, embedding_str in faces:
+                try:
+                    stored_embedding = np.array(json.loads(embedding_str))
+                    
+                    # Calculate euclidean distance
+                    euclidean_distance = np.linalg.norm(query_embedding - stored_embedding)
+                    
+                    # Calculate cosine similarity
+                    cosine_similarity = np.dot(query_embedding, stored_embedding) / (
+                        np.linalg.norm(query_embedding) * np.linalg.norm(stored_embedding)
+                    )
+                    cosine_distance = 1 - cosine_similarity
+                    
+                    # Check if this is a duplicate using stricter thresholds
+                    if (euclidean_distance <= duplicate_euclidean_threshold and 
+                        cosine_distance <= duplicate_cosine_threshold):
+                        
+                        return {
+                            'duplicate_username': username,
+                            'duplicate_first_name': first_name or '',
+                            'duplicate_last_name': last_name or '',
+                            'euclidean_distance': euclidean_distance,
+                            'cosine_similarity': cosine_similarity,
+                            'similarity_percentage': (1 - cosine_distance) * 100
+                        }
+                        
+                except Exception as e:
+                    print(f"Error processing face for {username} during duplicate check: {e}")
+                    continue
+            
+            return None
+            
+        except Exception as e:
+            print(f"Error checking face duplicates: {e}")
             return None
 
     def find_face_match(self, query_embedding: List[float]) -> Optional[Dict[str, any]]:
@@ -727,6 +948,73 @@ class DeepFaceAuthenticator(BaseAuthenticator):
         except Exception as e:
             print(f"Error finding face match: {e}")
             return None
+
+    def find_all_face_duplicates(self) -> List[Dict[str, any]]:
+        """
+        Find all potential face duplicates in the database.
+        
+        Returns:
+            List of dictionaries containing duplicate pairs information
+        """
+        if not DEEPFACE_AVAILABLE:
+            return []
+        
+        try:
+            conn = sqlite3.connect(self.db_path)
+            cursor = conn.cursor()
+            
+            cursor.execute("SELECT username, first_name, last_name, embedding FROM faces ORDER BY username")
+            faces = cursor.fetchall()
+            conn.close()
+            
+            if len(faces) < 2:
+                return []
+            
+            duplicates = []
+            duplicate_euclidean_threshold = 0.8
+            duplicate_cosine_threshold = 0.05
+            
+            # Compare each face with every other face
+            for i, (username1, first_name1, last_name1, embedding_str1) in enumerate(faces):
+                for j, (username2, first_name2, last_name2, embedding_str2) in enumerate(faces[i+1:], i+1):
+                    try:
+                        embedding1 = np.array(json.loads(embedding_str1))
+                        embedding2 = np.array(json.loads(embedding_str2))
+                        
+                        # Calculate similarity metrics
+                        euclidean_distance = np.linalg.norm(embedding1 - embedding2)
+                        cosine_similarity = np.dot(embedding1, embedding2) / (
+                            np.linalg.norm(embedding1) * np.linalg.norm(embedding2)
+                        )
+                        cosine_distance = 1 - cosine_similarity
+                        
+                        # Check if these faces are duplicates
+                        if (euclidean_distance <= duplicate_euclidean_threshold and 
+                            cosine_distance <= duplicate_cosine_threshold):
+                            
+                            duplicates.append({
+                                'user1': {
+                                    'username': username1,
+                                    'name': f"{first_name1 or ''} {last_name1 or ''}".strip()
+                                },
+                                'user2': {
+                                    'username': username2,
+                                    'name': f"{first_name2 or ''} {last_name2 or ''}".strip()
+                                },
+                                'euclidean_distance': euclidean_distance,
+                                'cosine_similarity': cosine_similarity,
+                                'similarity_percentage': (1 - cosine_distance) * 100
+                            })
+                            
+                    except Exception as e:
+                        print(f"Error comparing faces {username1} and {username2}: {e}")
+                        continue
+            
+            return duplicates
+            
+        except Exception as e:
+            print(f"Error finding all face duplicates: {e}")
+            return []
 
     def list_registered_faces(self) -> List[Dict[str, any]]:
         """List all registered faces."""
@@ -851,7 +1139,7 @@ class DeepFaceAuthenticator(BaseAuthenticator):
         """
         try:
             # Initialize LDAP authenticator
-            ldap_auth = LDAPAuthenticator()
+            ldap_auth = LDAPAuthenticator(Config())
             
             # Check if LDAP is available
             if not ldap_auth.is_available():
@@ -874,8 +1162,8 @@ class DeepFaceAuthenticator(BaseAuthenticator):
             if not ldap_success:
                 return False, f"Failed to create LDAP user: {ldap_message}"
             
-            # Register face with the same password
-            face_success = self.register_face(
+            # Register face with the same password using duplicate checking
+            face_success, face_message, duplicate_info = self.register_face_with_duplicate_check(
                 username=username,
                 first_name=first_name,
                 last_name=last_name,
@@ -888,7 +1176,23 @@ class DeepFaceAuthenticator(BaseAuthenticator):
             if not face_success:
                 # If face registration fails, try to clean up LDAP user
                 ldap_auth.delete_user(username)
-                return False, "Failed to register face. LDAP user creation rolled back."
+                
+                if duplicate_info:
+                    # Provide detailed duplicate information
+                    duplicate_user = duplicate_info['duplicate_username']
+                    duplicate_name = f"{duplicate_info['duplicate_first_name']} {duplicate_info['duplicate_last_name']}".strip()
+                    similarity = duplicate_info['similarity_percentage']
+                    
+                    detailed_error = f"Face registration failed: {face_message}\n"
+                    detailed_error += f"This face is already registered to user '{duplicate_user}'"
+                    if duplicate_name:
+                        detailed_error += f" ({duplicate_name})"
+                    detailed_error += f" with {similarity:.1f}% similarity.\n"
+                    detailed_error += "LDAP user creation rolled back."
+                    
+                    return False, detailed_error
+                else:
+                    return False, f"Failed to register face: {face_message}. LDAP user creation rolled back."
             
             SecurityUtils.log_security_event("USER_CREATED_WITH_FACE", 
                                            f"Created LDAP user with face registration: {username}, role: {role}")
@@ -938,5 +1242,51 @@ class DeepFaceAuthenticator(BaseAuthenticator):
         except Exception as e:
             return False, f"Error updating password: {str(e)}"
 
-
-    # TODO: add delete_user method
+    def delete_user(self, username: str) -> Tuple[bool, str]:
+        """
+        Delete a user from both DeepFace database and optionally LDAP.
+        
+        Args:
+            username: Username to delete
+            
+        Returns:
+            Tuple of (success, message)
+        """
+        try:
+            # Check if user exists in face database
+            user_info = self.get_user_info(username)
+            if not user_info:
+                return False, f"User '{username}' not found in face registration database"
+            
+            # Delete from face database
+            face_deleted = self.delete_face(username)
+            
+            if not face_deleted:
+                return False, f"Failed to delete face registration for user '{username}'"
+            
+            # Try to delete from LDAP as well (optional)
+            try:
+                ldap_auth = LDAPAuthenticator(Config())
+                if ldap_auth.is_available():
+                    ldap_success, ldap_message = ldap_auth.delete_user(username)
+                    if ldap_success:
+                        SecurityUtils.log_security_event("USER_DELETED_COMPLETE", 
+                                                       f"Deleted user from both face database and LDAP: {username}")
+                        return True, f"User '{username}' deleted successfully from both face database and LDAP"
+                    else:
+                        SecurityUtils.log_security_event("USER_DELETED_PARTIAL", 
+                                                       f"Deleted user from face database only: {username}. LDAP deletion failed: {ldap_message}")
+                        return True, f"User '{username}' deleted from face database. LDAP deletion failed: {ldap_message}"
+                else:
+                    SecurityUtils.log_security_event("USER_DELETED_FACE_ONLY", 
+                                                   f"Deleted user from face database only (LDAP not available): {username}")
+                    return True, f"User '{username}' deleted from face database (LDAP not available)"
+            except Exception as ldap_error:
+                SecurityUtils.log_security_event("USER_DELETED_FACE_ONLY", 
+                                               f"Deleted user from face database only (LDAP error): {username}")
+                return True, f"User '{username}' deleted from face database. LDAP deletion failed: {str(ldap_error)}"
+            
+        except Exception as e:
+            SecurityUtils.log_security_event("USER_DELETION_ERROR", 
+                                           f"Error deleting user: {username}, error: {str(e)}")
+            return False, f"Error deleting user: {str(e)}"

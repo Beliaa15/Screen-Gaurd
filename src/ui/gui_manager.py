@@ -66,6 +66,50 @@ class SecurityGUI:
         # Configure main window
         self.setup_window()
         
+    def safe_widget_config(self, widget, **config_options):
+        """Safely configure a widget, checking if it still exists."""
+        try:
+            if widget and widget.winfo_exists():
+                widget.config(**config_options)
+        except tk.TclError:
+            pass  # Widget was destroyed, ignore the error
+    
+    def safe_after_callback(self, delay, callback):
+        """Schedule a callback safely with widget existence checks."""
+        def safe_callback():
+            try:
+                callback()
+            except tk.TclError:
+                pass  # Widget was destroyed, ignore the error
+        
+        return self.root.after(delay, safe_callback)
+    
+    def cancel_all_pending_callbacks(self):
+        """Cancel all pending after callbacks to prevent widget access errors."""
+        # Cancel auto-start timer if it exists
+        if hasattr(self, 'auto_start_timer'):
+            try:
+                self.root.after_cancel(self.auto_start_timer)
+            except:
+                pass
+        
+        # Note: We can't cancel all pending callbacks since tkinter doesn't provide
+        # a way to do this, but our safe callbacks will handle destroyed widgets gracefully
+    
+    def clear_screen(self):
+        """Clear all widgets from the root window and maintain security properties."""
+        # Cancel any pending callbacks first
+        self.cancel_all_pending_callbacks()
+        
+        # Stop any active camera preview before clearing
+        self.stop_camera_preview()
+        
+        for widget in self.root.winfo_children():
+            widget.destroy()
+        
+        # Ensure security properties are maintained after clearing screen
+        self.maintain_security_properties()
+    
     def setup_modern_theme(self):
         """Setup modern theme and colors for the GUI."""
         self.style = ttk.Style()
@@ -696,7 +740,7 @@ class SecurityGUI:
         self.show_startup_progress()
 
         # Auto-proceed to login after 3 seconds (increased for better UX)
-        self.root.after(3000, self.show_login_screen)
+        self.safe_after_callback(3000, self.show_login_screen)
     
     def show_startup_progress(self):
         """Show progressive startup status updates."""
@@ -810,7 +854,7 @@ class SecurityGUI:
         self.create_modern_auth_buttons(methods_card)
 
         # Auto-start face recognition after 10 seconds
-        self.auto_start_timer = self.root.after(10000, lambda: self.auto_start_face_recognition())
+        self.auto_start_timer = self.safe_after_callback(10000, lambda: self.auto_start_face_recognition())
         
         # Add countdown indicator
         self.countdown_label = tk.Label(
@@ -889,14 +933,37 @@ class SecurityGUI:
         
         # Add prominent hover effects and click animation
         def on_enter_deep(e):
-            deepface_btn.config(bg=self.colors['primary_light'], font=("Segoe UI", 16, "bold"))
-            badge_label.config(fg=self.colors['primary_light'])
+            try:
+                if deepface_btn.winfo_exists():
+                    deepface_btn.config(bg=self.colors['primary_light'], font=("Segoe UI", 16, "bold"))
+                if badge_label.winfo_exists():
+                    badge_label.config(fg=self.colors['primary_light'])
+            except tk.TclError:
+                pass  # Widget was destroyed
+                
         def on_leave_deep(e):
-            deepface_btn.config(bg=self.colors['warning'], font=("Segoe UI", 16, "bold"))
-            badge_label.config(fg=self.colors['warning'])
+            try:
+                if deepface_btn.winfo_exists():
+                    deepface_btn.config(bg=self.colors['warning'], font=("Segoe UI", 16, "bold"))
+                if badge_label.winfo_exists():
+                    badge_label.config(fg=self.colors['warning'])
+            except tk.TclError:
+                pass  # Widget was destroyed
+                
         def on_click_deep(e):
-            deepface_btn.config(bg=self.colors['secondary'])
-            self.root.after(100, lambda: deepface_btn.config(bg=self.colors['primary_light']))
+            try:
+                if deepface_btn.winfo_exists():
+                    deepface_btn.config(bg=self.colors['secondary'])
+                    # Safe delayed callback with widget existence check
+                    def safe_restore():
+                        try:
+                            if deepface_btn.winfo_exists():
+                                deepface_btn.config(bg=self.colors['primary_light'])
+                        except tk.TclError:
+                            pass  # Widget was destroyed
+                    self.root.after(100, safe_restore)
+            except tk.TclError:
+                pass  # Widget was destroyed
         
         deepface_btn.bind("<Enter>", on_enter_deep)
         deepface_btn.bind("<Leave>", on_leave_deep)
@@ -954,7 +1021,8 @@ class SecurityGUI:
             if self.current_screen != "login" or self.countdown_seconds <= 0:
                 return
             
-            self.countdown_label.config(text=f"Face recognition will start automatically in {self.countdown_seconds} seconds...")
+            self.safe_widget_config(self.countdown_label, 
+                                  text=f"Face recognition will start automatically in {self.countdown_seconds} seconds...")
             self.countdown_seconds -= 1
             
             # Schedule next update
@@ -963,7 +1031,7 @@ class SecurityGUI:
             else:
                 # Hide countdown when done
                 if hasattr(self, 'countdown_label'):
-                    self.countdown_label.config(text="Starting face recognition...")
+                    self.safe_widget_config(self.countdown_label, text="Starting face recognition...")
         
         # Start countdown
         self.root.after(1000, update_countdown)
@@ -973,7 +1041,7 @@ class SecurityGUI:
         if hasattr(self, 'auto_start_timer'):
             self.root.after_cancel(self.auto_start_timer)
         if hasattr(self, 'countdown_label'):
-            self.countdown_label.config(text="")
+            self.safe_widget_config(self.countdown_label, text="")
     
     def select_auth_method(self, method):
         """Handle authentication method selection."""
@@ -1199,7 +1267,7 @@ class SecurityGUI:
         cancel_btn.pack()
         
         # Start authentication process
-        self.root.after(1000, self.attempt_fingerprint_login)
+        self.safe_after_callback(1000, self.attempt_fingerprint_login)
     
     def attempt_password_login(self):
         """Attempt domain/password authentication."""
@@ -1394,7 +1462,7 @@ class SecurityGUI:
         cancel_btn.pack()
         
         # Check camera availability and start preview
-        self.root.after(100, self.init_deepface_camera_async)
+        self.safe_after_callback(0, self.init_deepface_camera_async)
     
     def init_deepface_camera_async(self):
         """Initialize DeepFace camera asynchronously to avoid blocking UI."""
@@ -1403,23 +1471,31 @@ class SecurityGUI:
                 if self.check_camera_available():
                     camera_ready = self.init_camera_preview(self.camera_preview_label)
                     if camera_ready:
-                        self.root.after(0, lambda: self.camera_status_label.config(
-                            text="Camera active - Position your face in view", fg=self.colors['success']))
+                        self.safe_after_callback(0, lambda: self.safe_widget_config(
+                            self.camera_status_label,
+                            text="Camera active - Position your face in view", 
+                            fg=self.colors['success']))
                         self.root.after(0, self.start_camera_preview)
                         # Start authentication process after camera is ready
                         self.root.after(500, self.attempt_deepface_login)
                     else:
-                        self.root.after(0, lambda: self.camera_status_label.config(
-                            text="Camera unavailable - Using fallback mode", fg=self.colors['danger']))
-                        self.root.after(0, lambda: self.camera_preview_label.config(
+                        self.safe_after_callback(0, lambda: self.safe_widget_config(
+                            self.camera_status_label,
+                            text="Camera unavailable - Using fallback mode", 
+                            fg=self.colors['danger']))
+                        self.safe_after_callback(0, lambda: self.safe_widget_config(
+                            self.camera_preview_label,
                             text="📹\nCamera Not Available\n\nUsing fallback authentication", 
                             font=("Segoe UI", 12, "normal")))
                         # Still attempt authentication without preview
                         self.root.after(500, self.attempt_deepface_login)
                 else:
-                    self.root.after(0, lambda: self.camera_status_label.config(
-                        text="Camera in use by detection system", fg=self.colors['danger']))
-                    self.root.after(0, lambda: self.camera_preview_label.config(
+                    self.safe_after_callback(0, lambda: self.safe_widget_config(
+                        self.camera_status_label,
+                        text="Camera in use by detection system", 
+                        fg=self.colors['danger']))
+                    self.safe_after_callback(0, lambda: self.safe_widget_config(
+                        self.camera_preview_label,
                         text="📹\nCamera In Use\n\nDetection system is active\nStop detection to use camera preview", 
                         font=("Segoe UI", 11, "normal")))
                     # Show information dialog about camera conflict
@@ -1432,8 +1508,10 @@ class SecurityGUI:
                     self.root.after(500, self.attempt_deepface_login)
             except Exception as e:
                 print(f"Camera initialization error: {e}")
-                self.root.after(0, lambda: self.camera_status_label.config(
-                    text="Camera initialization failed", fg=self.colors['danger']))
+                self.safe_after_callback(0, lambda: self.safe_widget_config(
+                    self.camera_status_label,
+                    text="Camera initialization failed", 
+                    fg=self.colors['danger']))
                 # Still attempt authentication without preview
                 self.root.after(500, self.attempt_deepface_login)
         
@@ -1451,28 +1529,34 @@ class SecurityGUI:
             return
             
         # Start with initializing models
-        self.deepface_status.config(text="Initializing AI models...", fg=self.colors['warning'])
+        self.safe_widget_config(self.deepface_status, text="Initializing AI models...", fg=self.colors['warning'])
         
         def auth_thread():
             try:
                 # Check if DeepFace is available first
                 if not self.deepface_auth.is_available():
-                    self.root.after(0, lambda: self.deepface_status.config(
-                        text="DeepFace library not available", fg=self.colors['danger']))
+                    self.safe_after_callback(0, lambda: self.safe_widget_config(
+                        self.deepface_status,
+                        text="DeepFace library not available", 
+                        fg=self.colors['danger']))
                     self.root.after(0, lambda: self.handle_auth_result(
                         False, None, "deepface", "DeepFace library not installed"))
                     return
                 
                 # Update status to scanning
-                self.root.after(0, lambda: self.deepface_status.config(
-                    text="AI models ready - Scanning faces...", fg=self.colors['primary']))
+                self.safe_after_callback(0, lambda: self.safe_widget_config(
+                    self.deepface_status,
+                    text="AI models ready - Scanning faces...", 
+                    fg=self.colors['primary']))
                 
                 # Use the GUI's camera if available, otherwise fall back to DeepFace's method
                 if self.camera_cap and self.camera_preview_active:
                     result = self.authenticate_face_with_gui_camera(timeout=30)
                 else:
-                    self.root.after(0, lambda: self.deepface_status.config(
-                        text="Using fallback camera mode...", fg=self.colors['warning']))
+                    self.safe_after_callback(0, lambda: self.safe_widget_config(
+                        self.deepface_status,
+                        text="Using fallback camera mode...", 
+                        fg=self.colors['warning']))
                     result = self.deepface_auth.authenticate_face(timeout=30)
                     
                 if result:
@@ -1490,13 +1574,17 @@ class SecurityGUI:
                         # Face authentication only (no stored password)
                         self.root.after(0, lambda: self.handle_auth_result(True, username, "deepface", role))
                 else:
-                    self.root.after(0, lambda: self.deepface_status.config(
-                        text="No matching face found", fg=self.colors['danger']))
+                    self.safe_after_callback(0, lambda: self.safe_widget_config(
+                        self.deepface_status,
+                        text="No matching face found", 
+                        fg=self.colors['danger']))
                     self.root.after(0, lambda: self.handle_auth_result(False, None, "deepface", "Face not recognized by AI"))
             except Exception as e:
                 error_msg = f"DeepFace authentication error: {str(e)}"
-                self.root.after(0, lambda: self.deepface_status.config(
-                    text="Authentication error occurred", fg=self.colors['danger']))
+                self.safe_after_callback(0, lambda: self.safe_widget_config(
+                    self.deepface_status,
+                    text="Authentication error occurred", 
+                    fg=self.colors['danger']))
                 self.root.after(0, lambda: self.handle_auth_result(False, None, "deepface", error_msg))
         
         threading.Thread(target=auth_thread, daemon=True).start()
@@ -1588,10 +1676,10 @@ class SecurityGUI:
         def authenticate_with_password():
             password = password_entry.get().strip()
             if not password:
-                status_label.config(text="Password cannot be empty", fg=self.colors['danger'])
+                self.safe_widget_config(status_label, text="Password cannot be empty", fg=self.colors['danger'])
                 return
             
-            status_label.config(text="Authenticating with domain...", fg=self.colors['primary'])
+            self.safe_widget_config(status_label, text="Authenticating with domain...", fg=self.colors['primary'])
             
             def ldap_auth_thread():
                 try:
@@ -1600,10 +1688,14 @@ class SecurityGUI:
                         role = result.get('role', 'user')
                         self.root.after(0, lambda: self.handle_auth_result(True, username, "face_and_ldap", role))
                     else:
-                        self.root.after(0, lambda: status_label.config(text="Invalid password or domain authentication failed", fg=self.colors['danger']))
+                        self.safe_after_callback(0, lambda: self.safe_widget_config(
+                            status_label, 
+                            text="Invalid password or domain authentication failed", 
+                            fg=self.colors['danger']))
                 except Exception as e:
                     error_msg = f"Authentication error: {str(e)}"
-                    self.root.after(0, lambda: status_label.config(text=error_msg, fg=self.colors['danger']))
+                    self.safe_after_callback(0, lambda: self.safe_widget_config(
+                        status_label, text=error_msg, fg=self.colors['danger']))
             
             threading.Thread(target=ldap_auth_thread, daemon=True).start()
         
@@ -2358,6 +2450,12 @@ class SecurityGUI:
                  command=self.delete_selected_user_unified,
                  bg=self.colors['danger'], fg='white', 
                  font=("Segoe UI", 9, "bold"), relief='flat', bd=0, 
+                 padx=12, pady=6).pack(side='left', padx=(0, 10))
+        
+        tk.Button(mgmt_buttons_frame, text="Check Duplicates", 
+                 command=self.check_system_face_duplicates,
+                 bg=self.colors['warning'], fg='white', 
+                 font=("Segoe UI", 9, "bold"), relief='flat', bd=0, 
                  padx=12, pady=6).pack(side='left')
     
     def setup_modern_user_mgmt_right_panel(self, parent):
@@ -2800,8 +2898,50 @@ class SecurityGUI:
             self.password_strength_label.config(text="", fg=self.colors['on_surface'])
         self.log_user_mgmt_message("Form cleared")
     
+    def check_face_duplicate_warning(self, image_path: str = None) -> bool:
+        """
+        Check for face duplicates and show a warning dialog if found.
+        
+        Args:
+            image_path: Path to image file, or None to capture from camera
+            
+        Returns:
+            True if user wants to proceed despite duplicate, False to cancel
+        """
+        try:
+            is_duplicate, message, duplicate_info = self.deepface_auth.check_face_duplicate_from_image(image_path)
+            
+            if is_duplicate and duplicate_info:
+                duplicate_user = duplicate_info['duplicate_username']
+                duplicate_name = f"{duplicate_info['duplicate_first_name']} {duplicate_info['duplicate_last_name']}".strip()
+                similarity = duplicate_info['similarity_percentage']
+                
+                warning_title = "⚠️ Face Duplicate Detected"
+                warning_message = f"This face appears to match an existing user:\n\n"
+                warning_message += f"👤 Username: {duplicate_user}\n"
+                if duplicate_name:
+                    warning_message += f"📝 Name: {duplicate_name}\n"
+                warning_message += f"🎯 Similarity: {similarity:.1f}%\n\n"
+                warning_message += "Registration will be blocked to prevent face duplication.\n"
+                warning_message += "Each face can only be registered to one user for security."
+                
+                self.show_custom_dialog(warning_title, warning_message, "error")
+                self.log_user_mgmt_message(f"DUPLICATE DETECTED: {message}", "error")
+                return False
+            elif not is_duplicate:
+                self.log_user_mgmt_message("Face duplicate check passed - no duplicates found", "success")
+                return True
+            else:
+                # Error in duplicate checking, but allow to proceed
+                self.log_user_mgmt_message(f"Warning: Could not check for duplicates - {message}", "warning")
+                return True
+                
+        except Exception as e:
+            self.log_user_mgmt_message(f"Error checking for face duplicates: {str(e)}", "error")
+            return True  # Allow to proceed if check fails
+    
     def select_image_file(self):
-        """Select an image file for face registration."""
+        """Select an image file for face registration with duplicate checking."""
         file_path = filedialog.askopenfilename(
             title="Select Face Image",
             filetypes=[
@@ -2810,12 +2950,63 @@ class SecurityGUI:
             ]
         )
         if file_path:
-            self.selected_image_path = file_path
-            filename = os.path.basename(file_path)
-            if hasattr(self, 'image_label'):
-                self.image_label.config(text=f"Selected: {filename}", fg='lightgreen')
-            self.log_user_mgmt_message(f"Image selected: {filename}")
+            # Check for duplicates before accepting the image
+            self.log_user_mgmt_message(f"Checking selected image for face duplicates...")
+            
+            if self.check_face_duplicate_warning(file_path):
+                # No duplicates found or user chose to proceed
+                self.selected_image_path = file_path
+                filename = os.path.basename(file_path)
+                if hasattr(self, 'image_label'):
+                    self.image_label.config(text=f"✅ Selected: {filename}", fg='lightgreen')
+                self.log_user_mgmt_message(f"Image selected: {filename}", "success")
+            else:
+                # Duplicates found - don't set the image path
+                self.selected_image_path = ""
+                if hasattr(self, 'image_label'):
+                    self.image_label.config(text="❌ Image rejected (duplicate face)", fg='red')
+                self.log_user_mgmt_message("Image selection cancelled due to face duplicate", "error")
     
+    # System Maintenance Methods
+    def check_system_face_duplicates(self):
+        """Check for face duplicates across the entire system."""
+        self.log_user_mgmt_message("Scanning system for face duplicates...", "info")
+        
+        try:
+            duplicates = self.deepface_auth.find_all_face_duplicates()
+            
+            if not duplicates:
+                self.log_user_mgmt_message("✅ No face duplicates found in the system", "success")
+                self.show_custom_dialog("System Check Complete", 
+                                       "No face duplicates were found in the system.\nAll registered faces are unique.", 
+                                       "success")
+            else:
+                self.log_user_mgmt_message(f"⚠️ Found {len(duplicates)} potential face duplicate(s):", "warning")
+                
+                duplicate_details = f"Found {len(duplicates)} potential face duplicate(s):\n\n"
+                for i, dup in enumerate(duplicates, 1):
+                    user1 = dup['user1']
+                    user2 = dup['user2']
+                    similarity = dup['similarity_percentage']
+                    
+                    duplicate_details += f"{i}. {user1['username']}"
+                    if user1['name']:
+                        duplicate_details += f" ({user1['name']})"
+                    duplicate_details += f" ↔ {user2['username']}"
+                    if user2['name']:
+                        duplicate_details += f" ({user2['name']})"
+                    duplicate_details += f"\n   Similarity: {similarity:.1f}%\n\n"
+                    
+                    # Log each duplicate
+                    self.log_user_mgmt_message(f"   • {user1['username']} ↔ {user2['username']} ({similarity:.1f}% similar)", "warning")
+                
+                self.show_custom_dialog("⚠️ Face Duplicates Detected", duplicate_details, "warning")
+                
+        except Exception as e:
+            error_msg = f"Error checking for system duplicates: {str(e)}"
+            self.log_user_mgmt_message(error_msg, "error")
+            self.show_custom_dialog("Error", error_msg, "error")
+
     def log_user_mgmt_message(self, message, level="info"):
         """Log message to the user management output with timestamp and color coding."""
         if not hasattr(self, 'user_mgmt_output'):

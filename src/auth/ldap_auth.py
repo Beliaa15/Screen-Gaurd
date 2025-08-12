@@ -614,14 +614,41 @@ class LDAPAuthenticator(BaseAuthenticator):
             Tuple of (success, message)
         """
         try:
-            if not self.user_exists(username):
-                return False, f"User '{username}' does not exist"
+            # Create SSL server for secure operations
+            server = self._create_ssl_server()
             
-            server = Server(self.server_uri, get_info=ALL)
-            conn = Connection(server)
+            # Use administrative credentials to delete user
+            if not self.admin_password:
+                return False, "Admin credentials not configured for user deletion"
             
-            if not conn.bind():
-                return False, "Failed to connect to LDAP server with admin privileges"
+            # Try different admin authentication methods
+            admin_conn = None
+            auth_methods = [
+                (self.admin_dn, self.admin_password, 'SIMPLE'),
+                (f"{self.base_dn.split('.')[0]}\\{self.admin_user}", self.admin_password, 'SIMPLE'),
+                (f"{self.admin_user}@{self.base_dn}", self.admin_password, 'SIMPLE'),
+                (self.admin_user, self.admin_password, 'SIMPLE')
+            ]
+            
+            for admin_user_format, admin_pass, auth_type in auth_methods:
+                try:
+                    admin_conn = Connection(
+                        server, 
+                        user=admin_user_format, 
+                        password=admin_pass,
+                        authentication=auth_type,
+                        auto_bind=True
+                    )
+                    if admin_conn and admin_conn.bound:
+                        print(f"✅ Admin authentication successful using: {admin_user_format}")
+                        break
+                except Exception as auth_error:
+                    print(f"❌ Admin auth failed with {admin_user_format}: {auth_error}")
+                    admin_conn = None
+                    continue
+            
+            if not admin_conn or not admin_conn.bound:
+                return False, "Failed to authenticate with LDAP admin credentials for deletion"
             
             # Find user DN
             if '.' in self.base_dn:
@@ -631,28 +658,34 @@ class LDAPAuthenticator(BaseAuthenticator):
                 search_base = f"DC={self.base_dn}"
             
             search_filter = f"(sAMAccountName={username})"
-            conn.search(
+            admin_conn.search(
                 search_base=search_base,
                 search_filter=search_filter,
-                attributes=['dn']
+                attributes=['cn']  # We just need to confirm the user exists
             )
             
-            if not conn.entries:
-                conn.unbind()
-                return False, f"User '{username}' not found"
+            if not admin_conn.entries:
+                admin_conn.unbind()
+                return False, f"User '{username}' not found in LDAP"
             
-            user_dn = str(conn.entries[0].entry_dn)
+            user_entry = admin_conn.entries[0]
+            user_dn = str(user_entry.entry_dn)
             
-            # Delete user
-            success = conn.delete(user_dn)
+            print(f"🔍 Found user to delete: {user_dn}")
+            
+            # Delete user account
+            success = admin_conn.delete(user_dn)
             
             if success:
-                conn.unbind()
+                admin_conn.unbind()
                 SecurityUtils.log_security_event("LDAP_USER_DELETED", f"Deleted LDAP user: {username}")
-                return True, f"User '{username}' deleted successfully"
+                print(f"✅ User '{username}' deleted successfully from LDAP")
+                return True, f"User '{username}' deleted successfully from LDAP"
             else:
-                conn.unbind()
-                return False, f"Failed to delete user: {conn.result}"
+                admin_conn.unbind()
+                error_msg = f"Failed to delete user from LDAP: {admin_conn.result}"
+                print(f"❌ {error_msg}")
+                return False, error_msg
                 
         except LDAPException as e:
             return False, f"LDAP error deleting user: {str(e)}"
