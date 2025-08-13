@@ -4,6 +4,7 @@ Main Authentication Manager
 
 import queue
 import threading
+import cv2
 import mttkinter.mtTkinter as tk
 from typing import Optional, Tuple, Dict, Any
 
@@ -28,6 +29,16 @@ class AuthenticationManager:
         """Main method to require authentication before device access."""
         if not Config.AUTHENTICATION_REQUIRED:
             return True
+        # Always check lighting first
+        cap = cv2.VideoCapture(0)
+        ret, frame = cap.read()
+        cap.release()
+        if ret:
+            ok, msg = self.deepface_auth.is_lighting_ok(frame)
+            print(f"[Lighting Pre-Check] {msg}")
+            if not ok:
+                print("❌ Lighting not acceptable. Please adjust before continuing.")
+                return False
         
         # Check if there's a valid existing session
         if self.session_manager.load_session() and self.session_manager.is_session_valid():
