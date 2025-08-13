@@ -197,6 +197,8 @@ class SecurityGUI:
                            foreground='white',
                            relief='flat',
                            borderwidth=1)
+
+    
         
     def setup_window(self):
         """Configure the main window properties with modern styling."""
@@ -216,6 +218,29 @@ class SecurityGUI:
         
         # Setup window event handlers
         self.setup_window_events()
+
+    def check_lighting_conditions(self, frame):
+        """Check lighting conditions using both DeepFace and Biometric methods"""
+        results = []
+        messages = []
+        
+        # Check using DeepFace method
+        if self.deepface_auth:
+            deep_ok, deep_msg = self.deepface_auth.is_lighting_ok(frame)
+            results.append(deep_ok)
+            messages.append(f"DeepFace: {deep_msg}")
+            
+        # Check using Biometric method
+        if self.biometric_auth:
+            bio_ok, bio_msg = self.biometric_auth.is_lighting_ok(frame)
+            results.append(bio_ok)
+            messages.append(f"Biometric: {bio_msg}")
+        
+        # Combined result
+        all_ok = all(results)
+        combined_msg = " | ".join(messages)
+        
+        return all_ok, combined_msg
         
     def create_modern_button(self, parent, text, command, style='Modern.TButton', **kwargs):
         """Create a modern styled button."""
@@ -1397,7 +1422,16 @@ class SecurityGUI:
             font=("Segoe UI", 60, "bold")
         )
         self.deepface_icon.pack(pady=(10, 20))
-        
+        self.lighting_status = tk.Label(
+        auth_content,
+        text="Checking lighting conditions...",
+        fg=self.colors['warning'],
+        bg=self.colors['card'],
+        font=("Segoe UI", 12, "bold"),
+        wraplength=400
+    )
+        self.lighting_status.pack(pady=(0, 10))
+   
         # Instructions
         instructions_label = tk.Label(
             auth_content,
@@ -1419,6 +1453,26 @@ class SecurityGUI:
             wraplength=250
         )
         self.deepface_status.pack(pady=10)
+
+        def check_lighting_continuously():
+            if self.current_screen == "deepface" and self.camera_cap:
+                ret, frame = self.camera_cap.read()
+                if ret and frame is not None:
+                    lighting_ok, msg = self.check_lighting_conditions(frame)
+                    if lighting_ok:
+                        self.lighting_status.config(
+                            text=msg,
+                            fg=self.colors['success']
+                        )
+                    else:
+                        self.lighting_status.config(
+                            text=msg,
+                            fg=self.colors['warning']
+                        )
+                self.root.after(1000, check_lighting_continuously)
+            self.root.after(1500, check_lighting_continuously)
+        # Start continuous lighting check
+        self.root.after(1500, check_lighting_continuously)
         
         # Buttons frame
         buttons_frame = tk.Frame(auth_content, bg=self.colors['card'])
@@ -1496,7 +1550,16 @@ class SecurityGUI:
         """Attempt DeepFace authentication with GUI integration."""
         if self.current_screen != "deepface":
             return
-            
+         # Check lighting before proceeding
+        ret, frame = self.camera_cap.read()
+        if ret and frame is not None:
+            lighting_ok, msg = self.check_lighting_conditions(frame)
+            if not lighting_ok:
+                self.deepface_status.config(
+                    text=f"Cannot proceed: {msg}",
+                    fg=self.colors['danger']
+                )
+            return
         # Start with initializing models
         self.deepface_status.config(text="Initializing AI models...", fg=self.colors['warning'])
         
