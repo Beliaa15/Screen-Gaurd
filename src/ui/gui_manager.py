@@ -5,17 +5,13 @@ Modern themed interface with enhanced visual design.
 """
 
 import tkinter as tk
-from tkinter import ttk, filedialog, messagebox
+from tkinter import ttk, filedialog
 import threading
 import time
 import os
 from datetime import datetime
-import subprocess
-import sys
 from pathlib import Path
-from typing import Dict, Optional, Tuple
 import cv2
-import numpy as np
 from PIL import Image, ImageTk
 
 from ..core.config import Config
@@ -258,10 +254,6 @@ class SecurityGUI:
         # Setup window event handlers
         self.setup_window_events()
         
-    def create_modern_button(self, parent, text, command, style='Modern.TButton', **kwargs):
-        """Create a modern styled button."""
-        return ttk.Button(parent, text=text, command=command, style=style, **kwargs)
-    
     def create_modern_entry(self, parent, textvariable=None, show=None, width=None, **kwargs):
         """Create a modern styled entry widget that returns the actual entry."""        
         # Create the actual entry widget with modern styling
@@ -283,56 +275,6 @@ class SecurityGUI:
         # Return the actual entry widget
         return entry
     
-    def create_gradient_frame(self, parent, color1, color2, height=100):
-        """Create a gradient-like frame using canvas."""
-        canvas = tk.Canvas(parent, height=height, highlightthickness=0, bd=0, relief='flat')
-        canvas.pack(fill='x')
-        
-        def hex_to_rgb(hex_color):
-            """Convert hex color to RGB tuple."""
-            hex_color = hex_color.lstrip('#')
-            return tuple(int(hex_color[i:i+2], 16) for i in (0, 2, 4))
-        
-        def rgb_to_hex(rgb):
-            """Convert RGB tuple to hex color."""
-            return "#{:02x}{:02x}{:02x}".format(int(rgb[0]), int(rgb[1]), int(rgb[2]))
-        
-        def interpolate_color(color1, color2, ratio):
-            """Interpolate between two colors."""
-            rgb1 = hex_to_rgb(color1)
-            rgb2 = hex_to_rgb(color2)
-            
-            r = rgb1[0] + (rgb2[0] - rgb1[0]) * ratio
-            g = rgb1[1] + (rgb2[1] - rgb1[1]) * ratio
-            b = rgb1[2] + (rgb2[2] - rgb1[2]) * ratio
-            
-            return rgb_to_hex((r, g, b))
-        
-        def draw_gradient():
-            width = canvas.winfo_width()
-            if width > 1:
-                canvas.delete("all")
-                # Create smooth gradient with more steps for better quality
-                steps = min(height, 100)  # Limit steps for performance
-                step_height = height / steps
-                
-                for i in range(steps):
-                    y1 = int(i * step_height)
-                    y2 = int((i + 1) * step_height)
-                    ratio = i / (steps - 1) if steps > 1 else 0
-                    
-                    gradient_color = interpolate_color(color1, color2, ratio)
-                    canvas.create_rectangle(0, y1, width, y2, 
-                                          fill=gradient_color, outline=gradient_color)
-        
-        # Bind the gradient drawing to canvas configuration
-        canvas.bind('<Configure>', lambda e: canvas.after_idle(draw_gradient))
-        
-        # Draw initial gradient
-        canvas.after_idle(draw_gradient)
-        
-        return canvas
-        
     def maintain_security_properties(self):
         """Ensure security properties are maintained - call this periodically."""
         # Reapply security properties in case they were somehow modified
@@ -365,12 +307,6 @@ class SecurityGUI:
             return True  # Already initialized
             
         try:
-            # Try initializing camera with timeout
-            import signal
-            
-            def timeout_handler(signum, frame):
-                raise TimeoutError("Camera initialization timeout")
-                
             # Set up timeout (Windows doesn't support SIGALRM, so we'll use a different approach)
             start_time = time.time()
             
@@ -626,10 +562,6 @@ class SecurityGUI:
         self.show_startup_screen()
         self.root.mainloop()
     
-    def is_ready_for_detection(self):
-        """Check if GUI is ready for detection system to start."""
-        return self.is_authenticated
-    
     def show_startup_screen(self):
         """Show the modern startup screen with loading animation."""
         self.clear_screen()
@@ -788,25 +720,6 @@ class SecurityGUI:
             
             # Schedule next update on main thread
             self.root.after(300, update_dots)
-        
-        # Start animation on main thread
-        self.root.after(100, update_dots)
-        
-    def animate_loading(self):
-        """Animate loading dots."""
-        self.loading_step = 0
-        
-        def update_dots():
-            if self.current_screen != "startup" or self.loading_step >= 4:
-                return
-                
-            if hasattr(self, 'progress_label'):
-                dots = "." * self.loading_step
-                self.progress_label.config(text=dots)
-            
-            self.loading_step += 1
-            # Schedule next update on main thread
-            self.root.after(500, update_dots)
         
         # Start animation on main thread
         self.root.after(100, update_dots)
@@ -2524,205 +2437,6 @@ class SecurityGUI:
         self.refresh_user_list_unified()
         self.log_user_mgmt_message("🚀 Modern User Management System initialized", "success")
     
-    def setup_user_mgmt_left_panel(self, parent):
-        """Setup the left panel with user input and action buttons."""
-        
-        # User Information Section
-        info_frame = tk.LabelFrame(parent, text="User Information", 
-                                  font=("Helvetica", 12, "bold"), fg="gold", bg="darkblue")
-        info_frame.pack(fill='x', pady=5)
-        
-        # Username
-        tk.Label(info_frame, text="Username:", fg="white", bg="darkblue", font=("Helvetica", 10)).grid(row=0, column=0, sticky='w', padx=5, pady=3)
-        username_entry = tk.Entry(info_frame, textvariable=self.username_var, width=25, font=("Helvetica", 10))
-        username_entry.grid(row=0, column=1, padx=5, pady=3)
-        
-        # First Name
-        tk.Label(info_frame, text="First Name:", fg="white", bg="darkblue", font=("Helvetica", 10)).grid(row=1, column=0, sticky='w', padx=5, pady=3)
-        tk.Entry(info_frame, textvariable=self.first_name_var, width=25, font=("Helvetica", 10)).grid(row=1, column=1, padx=5, pady=3)
-        
-        # Last Name
-        tk.Label(info_frame, text="Last Name:", fg="white", bg="darkblue", font=("Helvetica", 10)).grid(row=2, column=0, sticky='w', padx=5, pady=3)
-        tk.Entry(info_frame, textvariable=self.last_name_var, width=25, font=("Helvetica", 10)).grid(row=2, column=1, padx=5, pady=3)
-        
-        # Email
-        tk.Label(info_frame, text="Email:", fg="white", bg="darkblue", font=("Helvetica", 10)).grid(row=3, column=0, sticky='w', padx=5, pady=3)
-        tk.Entry(info_frame, textvariable=self.email_var, width=25, font=("Helvetica", 10)).grid(row=3, column=1, padx=5, pady=3)
-        
-        # Role
-        tk.Label(info_frame, text="Role:", fg="white", bg="darkblue", font=("Helvetica", 10)).grid(row=4, column=0, sticky='w', padx=5, pady=3)
-        role_frame = tk.Frame(info_frame, bg="darkblue")
-        role_frame.grid(row=4, column=1, sticky='w', padx=5, pady=3)
-        
-        roles = [("User", "user"), ("Operator", "operator"), ("Admin", "admin")]
-        for i, (text, value) in enumerate(roles):
-            tk.Radiobutton(role_frame, text=text, variable=self.role_var, value=value,
-                          fg="white", bg="darkblue", selectcolor="navy", font=("Helvetica", 9)).pack(side='left', padx=5)
-        
-        # Add informational text about OU placement
-        ou_info_frame = tk.Frame(info_frame, bg="darkblue")
-        ou_info_frame.grid(row=4, column=2, sticky='w', padx=5, pady=3)
-        
-        # Clear button
-        tk.Button(info_frame, text="Clear Form", command=self.clear_user_form,
-                 bg='gray', fg='white', font=("Helvetica", 9)).grid(row=5, column=1, sticky='e', padx=5, pady=5)
-        
-        # Image Selection Section
-        image_frame = tk.LabelFrame(parent, text="Image Selection (Optional)", 
-                                   font=("Helvetica", 12, "bold"), fg="cyan", bg="darkblue")
-        image_frame.pack(fill='x', pady=5)
-        
-        self.image_label = tk.Label(image_frame, text="No image selected", 
-                                   fg="gray", bg="darkblue", font=("Helvetica", 9))
-        self.image_label.pack(pady=5)
-        
-        tk.Button(image_frame, text="Select Image File", command=self.select_image_file,
-                 bg='steelblue', fg='white', font=("Helvetica", 10)).pack(pady=5)
-        
-        # User Registration Actions
-        reg_frame = tk.LabelFrame(parent, text="User Registration Actions", 
-                                 font=("Helvetica", 12, "bold"), fg="lightgreen", bg="darkblue")
-        reg_frame.pack(fill='x', pady=5)
-        
-        tk.Button(reg_frame, text="Register User + Face (Camera)", 
-                 command=self.register_user_camera_unified,
-                 bg='darkgreen', fg='white', font=("Helvetica", 10), width=30).pack(pady=3)
-        
-        tk.Button(reg_frame, text="Register User + Face (Image)", 
-                 command=self.register_user_image_unified,
-                 bg='darkblue', fg='white', font=("Helvetica", 10), width=30).pack(pady=3)
-        
-        tk.Button(reg_frame, text="Register LDAP User Only", 
-                 command=self.create_ldap_user_only_unified,
-                 bg='purple', fg='white', font=("Helvetica", 10), width=30).pack(pady=3)
-        
-        # Authentication Testing
-        test_frame = tk.LabelFrame(parent, text="Authentication Testing", 
-                                  font=("Helvetica", 12, "bold"), fg="yellow", bg="darkblue")
-        test_frame.pack(fill='x', pady=5)
-        
-        test_buttons_frame = tk.Frame(test_frame, bg="darkblue")
-        test_buttons_frame.pack(pady=5)
-        
-        tk.Button(test_buttons_frame, text="Test DeepFace", 
-                 command=self.test_deepface_auth_unified,
-                 bg='darkviolet', fg='white', font=("Helvetica", 9), width=15).pack(side='left', padx=2)
-        
-        tk.Button(test_buttons_frame, text="Test Fingerprint", 
-                 command=self.test_fingerprint_auth_unified,
-                 bg='red', fg='white', font=("Helvetica", 9), width=15).pack(side='left', padx=2)
-        
-        # LDAP Authentication Testing (requires username/password)
-        ldap_test_frame = tk.Frame(test_frame, bg="darkblue")
-        ldap_test_frame.pack(pady=3)
-        
-        tk.Label(ldap_test_frame, text="Username:", fg="white", bg="darkblue", font=("Helvetica", 9)).pack(side='left')
-        tk.Entry(ldap_test_frame, textvariable=self.ldap_user_var, width=15, font=("Helvetica", 9)).pack(side='left', padx=3)
-        
-        tk.Label(ldap_test_frame, text="Password:", fg="white", bg="darkblue", font=("Helvetica", 9)).pack(side='left', padx=(10,0))
-        tk.Entry(ldap_test_frame, textvariable=self.ldap_pass_var, width=15, show='*', font=("Helvetica", 9)).pack(side='left', padx=3)
-        
-        tk.Button(ldap_test_frame, text="Login", 
-                 command=self.test_ldap_auth_unified,
-                 bg='orange', fg='white', font=("Helvetica", 9)).pack(side='left', padx=5)
-        
-        # User Management Actions
-        mgmt_frame = tk.LabelFrame(parent, text="User Management", 
-                                  font=("Helvetica", 12, "bold"), fg="lightblue", bg="darkblue")
-        mgmt_frame.pack(fill='x', pady=5)
-        
-        mgmt_buttons_frame = tk.Frame(mgmt_frame, bg="darkblue")
-        mgmt_buttons_frame.pack(pady=5)
-        
-        tk.Button(mgmt_buttons_frame, text="Refresh User List", 
-                 command=self.refresh_user_list_unified,
-                 bg='darkgreen', fg='white', font=("Helvetica", 9), width=15).pack(side='left', padx=2)
-        
-        tk.Button(mgmt_buttons_frame, text="Delete Selected User", 
-                 command=self.delete_selected_user_unified,
-                 bg='darkred', fg='white', font=("Helvetica", 9), width=20).pack(side='left', padx=2)
-        
-        # System Information
-        sys_frame = tk.LabelFrame(parent, text="System Information", 
-                                 font=("Helvetica", 12, "bold"), fg="orange", bg="darkblue")
-        sys_frame.pack(fill='x', pady=5)
-        
-        sys_buttons_frame = tk.Frame(sys_frame, bg="darkblue")
-        sys_buttons_frame.pack(pady=5)
-        
-        tk.Button(sys_buttons_frame, text="System Status", 
-                 command=self.show_system_status_unified,
-                 bg='brown', fg='white', font=("Helvetica", 9), width=15).pack(side='left', padx=2)
-        
-        tk.Button(sys_buttons_frame, text="View Security Logs", 
-                 command=self.view_security_logs_unified,
-                 bg='navy', fg='white', font=("Helvetica", 9), width=15).pack(side='left', padx=2)
-    
-    def setup_user_mgmt_right_panel(self, parent):
-        """Setup the right panel with output and user list."""
-        
-        # User List Section
-        users_frame = tk.LabelFrame(parent, text="Registered Users", 
-                                   font=("Helvetica", 12, "bold"), fg="lightgreen", bg="darkblue")
-        users_frame.pack(fill='both', expand=True, pady=(0,5))
-        
-        # User list with scrollbar
-        list_frame = tk.Frame(users_frame, bg="darkblue")
-        list_frame.pack(fill='both', expand=True, padx=5, pady=5)
-        
-        # Create Treeview for user list
-        columns = ('System', 'Username', 'Name', 'Role', 'Email', 'Created')
-        self.user_tree = ttk.Treeview(list_frame, columns=columns, show='headings', height=10)
-        
-        # Configure columns
-        self.user_tree.heading('System', text='Sources')
-        self.user_tree.heading('Username', text='Username')
-        self.user_tree.heading('Name', text='Full Name')
-        self.user_tree.heading('Role', text='Role')
-        self.user_tree.heading('Email', text='Email')
-        self.user_tree.heading('Created', text='Created')
-        
-        self.user_tree.column('System', width=100)  # Increased for "LDAP + DeepFace"
-        self.user_tree.column('Username', width=100)
-        self.user_tree.column('Name', width=150)
-        self.user_tree.column('Role', width=80)
-        self.user_tree.column('Email', width=150)
-        self.user_tree.column('Created', width=120)
-        
-        # Scrollbars for user list
-        v_scrollbar = ttk.Scrollbar(list_frame, orient='vertical', command=self.user_tree.yview)
-        h_scrollbar = ttk.Scrollbar(list_frame, orient='horizontal', command=self.user_tree.xview)
-        self.user_tree.configure(yscrollcommand=v_scrollbar.set, xscrollcommand=h_scrollbar.set)
-        
-        # Use grid for better scrollbar placement
-        self.user_tree.grid(row=0, column=0, sticky='nsew')
-        v_scrollbar.grid(row=0, column=1, sticky='ns')
-        h_scrollbar.grid(row=1, column=0, sticky='ew')
-        
-        # Configure grid weights
-        list_frame.grid_rowconfigure(0, weight=1)
-        list_frame.grid_columnconfigure(0, weight=1)
-        
-        # Output Section
-        output_frame = tk.LabelFrame(parent, text="System Output", 
-                                    font=("Helvetica", 12, "bold"), fg="white", bg="darkblue")
-        output_frame.pack(fill='both', expand=True, pady=(5,0))
-        
-        # Output text with scrollbar
-        output_container = tk.Frame(output_frame, bg="darkblue")
-        output_container.pack(fill='both', expand=True, padx=5, pady=5)
-        
-        self.user_mgmt_output = tk.Text(output_container, height=12, font=("Courier", 9), bg='black', fg='white')
-        output_scrollbar = ttk.Scrollbar(output_container, command=self.user_mgmt_output.yview)
-        self.user_mgmt_output.configure(yscrollcommand=output_scrollbar.set)
-        
-        self.user_mgmt_output.pack(side='left', fill='both', expand=True)
-        output_scrollbar.pack(side='right', fill='y')
-        
-        # Load initial data
-        self.refresh_user_list_unified()
-        self.log_user_mgmt_message("User Management System initialized")
-    
     # User Management Helper Methods
     def update_password_strength(self):
         """Update password strength indicator in real-time."""
@@ -3476,91 +3190,6 @@ class SecurityGUI:
             self.log_user_mgmt_message(f"Error deleting user {username}: {str(e)}", "error")
     
     # System Information Methods
-    def show_system_status_unified(self):
-        """Show system status information."""
-        self.log_user_mgmt_message("=== SYSTEM STATUS ===")
-        
-        try:
-            # LDAP Status
-            try:
-                # LDAP doesn't have a list_users method, just check availability
-                if self.ldap_auth.is_available():
-                    self.log_user_mgmt_message("LDAP Server: Connected (users count not available)")
-                else:
-                    self.log_user_mgmt_message("LDAP Server: Not available", "warning")
-            except Exception as e:
-                self.log_user_mgmt_message(f"LDAP Server: Error - {str(e)}", "error")
-            
-            # DeepFace Status
-            try:
-                deepface_users = self.deepface_auth.list_registered_faces()
-                self.log_user_mgmt_message(f"DeepFace System: Active ({len(deepface_users)} users)")
-            except Exception as e:
-                self.log_user_mgmt_message(f"DeepFace System: Error - {str(e)}", "error")
-            
-            # Biometric Status
-            try:
-                self.log_user_mgmt_message("Biometric System: Available")
-            except Exception as e:
-                self.log_user_mgmt_message(f"Biometric System: Error - {str(e)}", "error")
-            
-            # Database Status
-            try:
-                db_path = "face_data/deepface_auth.db"
-                if os.path.exists(db_path):
-                    size = os.path.getsize(db_path)
-                    self.log_user_mgmt_message(f"Database: Connected ({size} bytes)")
-                else:
-                    self.log_user_mgmt_message("Database: Not found", "warning")
-            except Exception as e:
-                self.log_user_mgmt_message(f"Database: Error - {str(e)}", "error")
-                
-        except Exception as e:
-            self.log_user_mgmt_message(f"Error checking system status: {str(e)}", "error")
-    
-    def view_security_logs_unified(self):
-        """View recent security logs."""
-        self.log_user_mgmt_message("=== RECENT SECURITY LOGS ===")
-        
-        try:
-            logs_dir = "logs"
-            if not os.path.exists(logs_dir):
-                self.log_user_mgmt_message("Logs directory not found", "warning")
-                return
-            
-            # Get the most recent log file
-            log_files = [f for f in os.listdir(logs_dir) if f.startswith("security_log_")]
-            if not log_files:
-                self.log_user_mgmt_message("No security log files found", "warning")
-                return
-            
-            # Sort by date and get the most recent
-            log_files.sort(reverse=True)
-            recent_log = os.path.join(logs_dir, log_files[0])
-            
-            self.log_user_mgmt_message(f"Showing recent entries from: {log_files[0]}")
-            
-            # Read and display last 10 lines
-            with open(recent_log, 'r') as f:
-                lines = f.readlines()
-                recent_lines = lines[-10:] if len(lines) > 10 else lines
-                
-                for line in recent_lines:
-                    self.log_user_mgmt_message(line.strip())
-            
-        except Exception as e:
-            self.log_user_mgmt_message(f"Error reading security logs: {str(e)}", "error")
-        
-        # Show camera/detection status
-        if self.detection_running:
-            self.log_user_mgmt_output("⚠️  WARNING: Detection system is currently running")
-            self.log_user_mgmt_output("📹 Camera is being used by detection system")
-            self.log_user_mgmt_output("💡 Face registration from camera may fail")
-            self.log_user_mgmt_output("🔧 Consider using 'Register Face (Image)' instead")
-        else:
-            self.log_user_mgmt_output("✅ Camera available for face registration")
-            self.log_user_mgmt_output("📹 Detection system inactive - GUI mode active")
-    
     def show_security_logs(self):
         """Show the modern security logs interface within the GUI."""
         self.clear_screen()
@@ -3688,176 +3317,6 @@ class SecurityGUI:
         
         # Load initial logs
         self.refresh_security_logs()
-    
-    def view_security_logs(self):
-        """Deprecated - replaced by show_security_logs."""
-        self.show_security_logs()
-    
-    def log_user_mgmt_output(self, message: str):
-        """Log message to user management output area."""
-        self.log_user_mgmt_message(message, "info")
-    
-    def show_file_selection_dialog(self, title, filetypes, callback):
-        """Show file selection dialog within GUI."""
-        # For now, we'll use a simple text input for the file path
-        # In a full implementation, you could create a file browser within the GUI
-        def on_path_input(file_path):
-            if file_path and callback:
-                callback(file_path)
-        
-        self.show_custom_dialog("File Path", f"{title}\nEnter full path to image file:", "info", input_field=True, callback=on_path_input)
-    
-    def _process_image_registration(self, username, password, image_path):
-        """Process image registration with given username, password and path."""
-        if not image_path:
-            return
-        
-        self.log_user_mgmt_output(f"Registering face from image for user: {username}")
-        self.log_user_mgmt_output(f"Image path: {image_path}")
-        
-        def registration_thread():
-            try:
-                success = self.deepface_auth.register_face(username, image_path, password=password)
-                if success:
-                    self.root.after(0, lambda: self.log_user_mgmt_output(f"✅ Face registered successfully for {username}"))
-                    self.root.after(0, lambda: self.show_custom_dialog("Success", f"Face registered successfully for {username}", "info"))
-                else:
-                    self.root.after(0, lambda: self.log_user_mgmt_output(f"❌ Face registration failed for {username}"))
-                    self.root.after(0, lambda: self.show_custom_dialog("Error", f"Face registration failed for {username}", "error"))
-            except Exception as e:
-                self.root.after(0, lambda: self.log_user_mgmt_output(f"❌ Error during face registration: {e}"))
-                self.root.after(0, lambda: self.show_custom_dialog("Error", f"Face registration error: {e}", "error"))
-        
-        threading.Thread(target=registration_thread, daemon=True).start()
-    
-    def list_registered_users(self):
-        """List all registered users."""
-        self.log_user_mgmt_output("Retrieving list of registered users...")
-        
-        def list_thread():
-            try:
-                users = self.deepface_auth.list_registered_faces()
-                if users:
-                    self.root.after(0, lambda: self.log_user_mgmt_output(f"✅ Found {len(users)} registered users:"))
-                    for user in users:
-                        if isinstance(user, dict):
-                            user_info = f"  - {user.get('first_name', '')} {user.get('last_name', '')} ({user.get('username', 'N/A')})"
-                            if user.get('email'):
-                                user_info += f" - {user['email']}"
-                            if user.get('role'):
-                                user_info += f" [{user['role']}]"
-                            # Fix closure issue by capturing user_info in a new scope
-                            self.root.after(0, self._log_user_info, user_info)
-                        else:
-                            user_info = f"  - {user}"
-                            self.root.after(0, self._log_user_info, user_info)
-                else:
-                    self.root.after(0, lambda: self.log_user_mgmt_output("No registered users found."))
-            except Exception as e:
-                self.root.after(0, lambda: self.log_user_mgmt_output(f"❌ Error retrieving users: {e}"))
-        
-        threading.Thread(target=list_thread, daemon=True).start()
-    
-    def _log_user_info(self, user_info):
-        """Helper method to log user info (fixes closure issues)."""
-        self.log_user_mgmt_output(user_info)
-    
-    def delete_user_face(self):
-        """Delete a user's face registration."""
-        def on_username_input(username):
-            if not username:
-                return
-            
-            def on_confirmation(confirmed):
-                if not confirmed:
-                    return
-                
-                self.log_user_mgmt_output(f"Deleting user registration for: {username}")
-                
-                def delete_thread():
-                    try:
-                        success = self.deepface_auth.delete_face(username)
-                        if success:
-                            self.root.after(0, lambda: self.log_user_mgmt_output(f"✅ User {username} deleted successfully"))
-                            self.root.after(0, lambda: self.show_custom_dialog("Success", f"User {username} deleted successfully", "info"))
-                        else:
-                            self.root.after(0, lambda: self.log_user_mgmt_output(f"❌ Failed to delete user {username}"))
-                            self.root.after(0, lambda: self.show_custom_dialog("Error", f"Failed to delete user {username}", "error"))
-                    except Exception as e:
-                        self.root.after(0, lambda: self.log_user_mgmt_output(f"❌ Error deleting user: {e}"))
-                        self.root.after(0, lambda: self.show_custom_dialog("Error", f"Error deleting user: {e}", "error"))
-                
-                threading.Thread(target=delete_thread, daemon=True).start()
-            
-            self.show_custom_dialog("Confirm Deletion", f"Are you sure you want to delete user '{username}'?", "yesno", callback=on_confirmation)
-        
-        self.show_custom_dialog("Delete User", "Enter username to delete:", "info", input_field=True, callback=on_username_input)
-    
-    def test_deepface_auth(self):
-        """Test DeepFace recognition authentication."""
-        self.log_user_mgmt_output("Starting DeepFace recognition test...")
-        
-        def test_thread():
-            try:
-                result = self.deepface_auth.authenticate_face(timeout=30)
-                if result:
-                    user_info = f"{result.get('first_name', '')} {result.get('last_name', '')} ({result.get('username', 'N/A')})"
-                    self.root.after(0, lambda: self.log_user_mgmt_output(f"✅ DeepFace authentication successful for user: {user_info}"))
-                    self.root.after(0, lambda: self.log_user_mgmt_output(f"   - Role: {result.get('role', 'N/A')}"))
-                    self.root.after(0, lambda: self.log_user_mgmt_output(f"   - Email: {result.get('email', 'N/A')}"))
-                    if 'euclidean_distance' in result:
-                        self.root.after(0, lambda: self.log_user_mgmt_output(f"   - Euclidean Distance: {result['euclidean_distance']:.4f}"))
-                    if 'cosine_similarity' in result:
-                        self.root.after(0, lambda: self.log_user_mgmt_output(f"   - Cosine Similarity: {result['cosine_similarity']:.4f}"))
-                    success_msg = f"DeepFace authentication successful!\nUser: {user_info}\nRole: {result.get('role', 'N/A')}"
-                    self.root.after(0, lambda: self.show_custom_dialog("Success", success_msg, "info"))
-                else:
-                    self.root.after(0, lambda: self.log_user_mgmt_output("❌ DeepFace authentication failed or timed out"))
-                    self.root.after(0, lambda: self.show_custom_dialog("Failed", "DeepFace authentication failed or timed out", "error"))
-            except Exception as e:
-                self.root.after(0, lambda: self.log_user_mgmt_output(f"❌ DeepFace authentication error: {e}"))
-                self.root.after(0, lambda: self.show_custom_dialog("Error", f"DeepFace authentication error: {e}", "error"))
-        
-        threading.Thread(target=test_thread, daemon=True).start()
-    
-    def test_ldap_auth(self):
-        """Test LDAP authentication."""
-        def on_username_input(username):
-            if not username:
-                return
-            
-            def on_password_input(password):
-                if not password:
-                    return
-                
-                self.log_user_mgmt_output(f"Testing LDAP authentication for user: {username}")
-                
-                def test_thread():
-                    try:
-                        ldap_auth = LDAPAuthenticator(Config())
-                        success, result = ldap_auth.authenticate({
-                            'username': username,
-                            'password': password
-                        })
-                        
-                        if success:
-                            self.root.after(0, lambda: self.log_user_mgmt_output(f"✅ LDAP authentication successful for {username}"))
-                            self.root.after(0, lambda: self.log_user_mgmt_output(f"User info: {result}"))
-                            role = result.get('role', 'Unknown') if isinstance(result, dict) else 'User'
-                            success_msg = f"LDAP authentication successful!\nUser: {username}\nRole: {role}"
-                            self.root.after(0, lambda: self.show_custom_dialog("Success", success_msg, "info"))
-                        else:
-                            self.root.after(0, lambda: self.log_user_mgmt_output(f"❌ LDAP authentication failed: {result}"))
-                            self.root.after(0, lambda: self.show_custom_dialog("Error", f"LDAP authentication failed: {result}", "error"))
-                    except Exception as e:
-                        self.root.after(0, lambda: self.log_user_mgmt_output(f"❌ LDAP authentication error: {e}"))
-                        self.root.after(0, lambda: self.show_custom_dialog("Error", f"LDAP authentication error: {e}", "error"))
-                
-                threading.Thread(target=test_thread, daemon=True).start()
-            
-            self.show_custom_dialog("LDAP Test", "Enter password:", "info", input_field=True, password=True, callback=on_password_input)
-        
-        self.show_custom_dialog("LDAP Test", "Enter username:", "info", input_field=True, callback=on_username_input)
     
     def refresh_security_logs(self):
         """Refresh and display security logs."""
@@ -4165,10 +3624,6 @@ class SecurityGUI:
             cursor='hand2'
         )
         retry_btn.pack(pady=(0, 20))
-    
-    def show_security_error(self, title, message):
-        """Show security error dialog."""
-        self.show_custom_dialog(title, message, "error")
 
 
 if __name__ == "__main__":
