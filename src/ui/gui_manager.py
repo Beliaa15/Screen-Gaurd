@@ -2474,14 +2474,14 @@ class SecurityGUI:
                                      height=12, style='Modern.Treeview')
         
         # Configure columns with modern styling
-        self.user_tree.heading('System', text='System')
+        self.user_tree.heading('System', text='Sources')
         self.user_tree.heading('Username', text='Username')
         self.user_tree.heading('Name', text='Full Name')
         self.user_tree.heading('Role', text='Role')
         self.user_tree.heading('Email', text='Email')
         self.user_tree.heading('Created', text='Created')
         
-        self.user_tree.column('System', width=80)
+        self.user_tree.column('System', width=100)  # Increased for "LDAP + DeepFace"
         self.user_tree.column('Username', width=100)
         self.user_tree.column('Name', width=150)
         self.user_tree.column('Role', width=80)
@@ -2675,14 +2675,14 @@ class SecurityGUI:
         self.user_tree = ttk.Treeview(list_frame, columns=columns, show='headings', height=10)
         
         # Configure columns
-        self.user_tree.heading('System', text='System')
+        self.user_tree.heading('System', text='Sources')
         self.user_tree.heading('Username', text='Username')
         self.user_tree.heading('Name', text='Full Name')
         self.user_tree.heading('Role', text='Role')
         self.user_tree.heading('Email', text='Email')
         self.user_tree.heading('Created', text='Created')
         
-        self.user_tree.column('System', width=80)
+        self.user_tree.column('System', width=100)  # Increased for "LDAP + DeepFace"
         self.user_tree.column('Username', width=100)
         self.user_tree.column('Name', width=150)
         self.user_tree.column('Role', width=80)
@@ -3336,9 +3336,9 @@ class SecurityGUI:
             # Get LDAP users
             ldap_users = []
             try:
-                # LDAP doesn't have a list_users method, skip for now
-                # ldap_users = self.ldap_auth.list_users()
-                ldap_users = []
+                ldap_users = self.ldap_auth.list_users()
+                if not ldap_users:
+                    ldap_users = []
             except Exception as e:
                 self.log_user_mgmt_message(f"Warning: Could not retrieve LDAP users: {str(e)}", "warning")
             
@@ -3351,37 +3351,85 @@ class SecurityGUI:
             except Exception as e:
                 self.log_user_mgmt_message(f"Warning: Could not retrieve DeepFace users: {str(e)}", "warning")
             
-            # Combine and display users
-            all_usernames = set()
+            # Create a unified user list with deduplication
+            unified_users = {}  # Use username as key to avoid duplicates
             
-            # Add LDAP users
+            # Process LDAP users first (they take priority)
             for user in ldap_users:
                 username = user.get('username', 'Unknown')
-                all_usernames.add(username)
-                
-                self.user_tree.insert('', 'end', values=(
-                    'LDAP',
-                    username,
-                    f"{user.get('first_name', '')} {user.get('last_name', '')}".strip(),
-                    user.get('role', 'Unknown'),
-                    user.get('email', ''),
-                    user.get('created_date', '')
-                ))
+                unified_users[username] = {
+                    'username': username,
+                    'first_name': user.get('first_name', ''),
+                    'last_name': user.get('last_name', ''),
+                    'display_name': user.get('display_name', ''),
+                    'email': user.get('email', ''),
+                    'role': user.get('role', 'user'),
+                    'created_date': user.get('created_date', ''),
+                    'sources': ['LDAP']  # Track which systems the user exists in
+                }
             
-            # Add DeepFace users (only if not already in LDAP)
+            # Process DeepFace users and merge with LDAP users
             for user in deepface_users:
                 username = user.get('username', 'Unknown')
-                if username not in all_usernames:
-                    self.user_tree.insert('', 'end', values=(
-                        'DeepFace',
-                        username,
-                        f"{user.get('first_name', '')} {user.get('last_name', '')}".strip(),
-                        user.get('role', 'Unknown'),
-                        user.get('email', ''),
-                        user.get('registration_date', '')
-                    ))
+                if username in unified_users:
+                    # User exists in both systems - merge the information
+                    unified_users[username]['sources'].append('DeepFace')
+                    # Prefer LDAP data but fill in missing fields from DeepFace
+                    if not unified_users[username]['first_name'] and user.get('first_name'):
+                        unified_users[username]['first_name'] = user.get('first_name', '')
+                    if not unified_users[username]['last_name'] and user.get('last_name'):
+                        unified_users[username]['last_name'] = user.get('last_name', '')
+                    if not unified_users[username]['email'] and user.get('email'):
+                        unified_users[username]['email'] = user.get('email', '')
+                    if not unified_users[username]['display_name'] and user.get('display_name'):
+                        unified_users[username]['display_name'] = user.get('display_name', '')
+                else:
+                    # User only exists in DeepFace
+                    unified_users[username] = {
+                        'username': username,
+                        'first_name': user.get('first_name', ''),
+                        'last_name': user.get('last_name', ''),
+                        'display_name': user.get('display_name', ''),
+                        'email': user.get('email', ''),
+                        'role': user.get('role', 'user'),
+                        'created_date': user.get('created_date', ''),
+                        'sources': ['DeepFace']
+                    }
             
-            self.log_user_mgmt_message(f"User list refreshed - LDAP: {len(ldap_users)}, DeepFace: {len(deepface_users)}")
+            # Add users to the tree view
+            for user_data in unified_users.values():
+                # Build display name
+                display_name = user_data['display_name']
+                if not display_name:
+                    display_name = f"{user_data['first_name']} {user_data['last_name']}".strip()
+                if not display_name:
+                    display_name = user_data['username']
+                
+                # Format sources for display
+                sources_str = ' + '.join(user_data['sources'])
+                
+                # Add visual indicator for users in both systems
+                if len(user_data['sources']) > 1:
+                    sources_str = f"🔗 {sources_str}"  # Link icon for unified users
+                
+                self.user_tree.insert('', 'end', values=(
+                    sources_str,
+                    user_data['username'],
+                    display_name,
+                    user_data['role'],
+                    user_data['email'],
+                    user_data['created_date']
+                ))
+            
+            # Update log with summary
+            total_users = len(unified_users)
+            ldap_count = len(ldap_users)
+            deepface_count = len(deepface_users)
+            unified_count = sum(1 for user in unified_users.values() if len(user['sources']) > 1)
+            
+            self.log_user_mgmt_message(
+                f"User list refreshed - Total: {total_users} users (LDAP: {ldap_count}, DeepFace: {deepface_count}, Unified: {unified_count})"
+            )
             
         except Exception as e:
             self.log_user_mgmt_message(f"Error refreshing user list: {str(e)}", "error")

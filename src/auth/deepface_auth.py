@@ -1172,14 +1172,28 @@ class DeepFaceAuthenticator(BaseAuthenticator):
             
             result = []
             for face in faces:
+                # Format created_at to match LDAP format (date only)
+                created_date = ''
+                if face[5]:
+                    try:
+                        created_date = face[5][:10]  # Get date part only
+                    except:
+                        created_date = face[5]
+                
+                # Build display name
+                first_name = face[1] or ''
+                last_name = face[2] or ''
+                display_name = f"{first_name} {last_name}".strip()
+                
                 result.append({
                     'username': face[0],
-                    'first_name': face[1] or '',
-                    'last_name': face[2] or '',
+                    'first_name': first_name,
+                    'last_name': last_name,
+                    'display_name': display_name or face[0],  # Fallback to username
                     'email': face[3] or '',
                     'role': face[4] or 'user',
-                    'created_at': face[5],
-                    'updated_at': face[6]
+                    'created_date': created_date,
+                    'source': 'DeepFace'
                 })
             
             return result

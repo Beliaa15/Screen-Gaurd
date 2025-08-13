@@ -2,7 +2,7 @@
 LDAP Authentication Module
 """
 
-from typing import Tuple, Dict, Any, Optional
+from typing import Tuple, Dict, Any, Optional, List
 from ldap3 import Server, Connection, ALL, NTLM, MODIFY_ADD, MODIFY_DELETE, MODIFY_REPLACE, Tls
 from ldap3.core.exceptions import LDAPException
 import secrets
@@ -246,6 +246,127 @@ class LDAPAuthenticator(BaseAuthenticator):
         except Exception as e:
             print(f"Error checking if user exists: {e}")
             return False
+
+    def list_users(self) -> List[Dict[str, Any]]:
+        """List all users from LDAP directory."""
+        try:
+            # Create SSL server for secure connection
+            server = self._create_ssl_server()
+            
+            # Use administrative credentials to list users
+            if not self.admin_password:
+                print("No admin password configured - cannot list users")
+                return []
+            
+            # Try different admin authentication methods
+            admin_conn = None
+            auth_methods = [
+                (f"{self.base_dn.split('.')[0]}\\{self.admin_user}", self.admin_password, 'SIMPLE'),
+                (f"{self.admin_user}@{self.base_dn}", self.admin_password, 'SIMPLE'),
+                (self.admin_dn, self.admin_password, 'SIMPLE'),
+                (self.admin_user, self.admin_password, 'SIMPLE')
+            ]
+            
+            for auth_user, auth_pass, auth_type in auth_methods:
+                try:
+                    if auth_type:
+                        admin_conn = Connection(server, user=auth_user, password=auth_pass, authentication=auth_type)
+                    else:
+                        admin_conn = Connection(server, user=auth_user, password=auth_pass)
+                    
+                    if admin_conn.bind():
+                        print(f"Admin authentication successful with: {auth_user}")
+                        break
+                    else:
+                        admin_conn = None
+                except Exception as e:
+                    print(f"Admin auth failed for {auth_user}: {e}")
+                    continue
+            
+            if not admin_conn or not admin_conn.bound:
+                print("Failed to authenticate admin user for listing users")
+                return []
+            
+            # Prepare search base - convert domain to DN format
+            if '.' in self.base_dn:
+                search_base = f"DC={self.base_dn.replace('.', ',DC=')}"
+            else:
+                search_base = self.base_dn
+            
+            # Search for all user objects
+            search_filter = "(&(objectClass=user)(objectCategory=person)(!(userAccountControl:1.2.840.113556.1.4.803:=2)))"  # Exclude disabled accounts
+            
+            admin_conn.search(
+                search_base=search_base,
+                search_filter=search_filter,
+                attributes=['sAMAccountName', 'cn', 'displayName', 'mail', 'memberOf', 'department', 'whenCreated'],
+                size_limit=1000  # Limit results to prevent overwhelming
+            )
+            
+            users = []
+            for entry in admin_conn.entries:
+                try:
+                    username = str(entry.sAMAccountName) if hasattr(entry, 'sAMAccountName') else ''
+                    if not username:
+                        continue
+                    
+                    # Skip system accounts and built-in accounts
+                    if username.lower() in ['administrator', 'guest', 'krbtgt', 'defaultaccount']:
+                        continue
+                    
+                    # Get user groups and determine role
+                    user_groups = entry.memberOf.values if hasattr(entry, 'memberOf') else []
+                    role = self._determine_user_role(user_groups)
+                    
+                    # Extract name components
+                    display_name = str(entry.displayName) if hasattr(entry, 'displayName') else ''
+                    cn = str(entry.cn) if hasattr(entry, 'cn') else ''
+                    
+                    # Parse first and last name from display name or cn
+                    first_name = ''
+                    last_name = ''
+                    if display_name:
+                        name_parts = display_name.split(' ', 1)
+                        first_name = name_parts[0] if len(name_parts) > 0 else ''
+                        last_name = name_parts[1] if len(name_parts) > 1 else ''
+                    elif cn:
+                        name_parts = cn.split(' ', 1)
+                        first_name = name_parts[0] if len(name_parts) > 0 else ''
+                        last_name = name_parts[1] if len(name_parts) > 1 else ''
+                    
+                    # Get creation date
+                    created_date = ''
+                    if hasattr(entry, 'whenCreated'):
+                        try:
+                            created_date = str(entry.whenCreated)[:10]  # Get date part only
+                        except:
+                            created_date = ''
+                    
+                    user_info = {
+                        'username': username,
+                        'first_name': first_name,
+                        'last_name': last_name,
+                        'display_name': display_name or f"{first_name} {last_name}".strip(),
+                        'email': str(entry.mail) if hasattr(entry, 'mail') else '',
+                        'department': str(entry.department) if hasattr(entry, 'department') else '',
+                        'role': role,
+                        'created_date': created_date,
+                        'source': 'LDAP'
+                    }
+                    
+                    users.append(user_info)
+                    
+                except Exception as e:
+                    print(f"Error processing LDAP user entry: {e}")
+                    continue
+            
+            admin_conn.unbind()
+            print(f"Retrieved {len(users)} users from LDAP")
+            return users
+            
+        except Exception as e:
+            print(f"Error listing LDAP users: {e}")
+            return []
 
     def create_user(self, username: str, password: str, first_name: str = "", 
                    last_name: str = "", email: str = "", role: str = "user") -> Tuple[bool, str]:
