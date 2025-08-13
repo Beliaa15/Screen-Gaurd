@@ -270,7 +270,7 @@ class DeepFaceAuthenticator(BaseAuthenticator):
                 return False, f"Face confidence ({confidence:.2f}) too low for reliable duplicate checking", None
             
             # Check for duplicates
-            duplicate_check = self.check_face_duplicate(embedding, exclude_username)
+            duplicate_check = self.check_face_duplicate(embedding, exclude_username, query_image=image)
             
             if duplicate_check:
                 duplicate_user = duplicate_check['duplicate_username']
@@ -338,7 +338,7 @@ class DeepFaceAuthenticator(BaseAuthenticator):
                 return False, f"Face confidence ({confidence:.2f}) below threshold ({self.confidence_threshold}). Please ensure good lighting and clear face visibility.", None
             
             # Check for face duplicates before registration
-            duplicate_check = self.check_face_duplicate(embedding, exclude_username=username)
+            duplicate_check = self.check_face_duplicate(embedding, exclude_username=username, query_image=image)
             if duplicate_check:
                 duplicate_user = duplicate_check['duplicate_username']
                 duplicate_name = f"{duplicate_check['duplicate_first_name']} {duplicate_check['duplicate_last_name']}".strip()
@@ -404,7 +404,7 @@ class DeepFaceAuthenticator(BaseAuthenticator):
                 return False
             
             # Check for face duplicates before registration
-            duplicate_check = self.check_face_duplicate(embedding, exclude_username=username)
+            duplicate_check = self.check_face_duplicate(embedding, exclude_username=username, query_image=image)
             if duplicate_check:
                 duplicate_user = duplicate_check['duplicate_username']
                 duplicate_name = f"{duplicate_check['duplicate_first_name']} {duplicate_check['duplicate_last_name']}".strip()
@@ -629,7 +629,7 @@ class DeepFaceAuthenticator(BaseAuthenticator):
                     continue
                 
                 # Search for matching face in database
-                match_result = self.find_face_match(embedding)
+                match_result = self.find_face_match(embedding, query_image=frame)
                 
                 if match_result:
                     cap.release()
@@ -745,7 +745,7 @@ class DeepFaceAuthenticator(BaseAuthenticator):
                     continue
                 
                 # Search for matching face in database
-                match_result = self.find_face_match(embedding)
+                match_result = self.find_face_match(embedding, query_image=frame)
                 
                 if match_result:
                     # Face authentication successful
@@ -817,26 +817,30 @@ class DeepFaceAuthenticator(BaseAuthenticator):
             SecurityUtils.log_security_event("AUTH_ERROR", f"Authentication error for {username}: {str(e)}")
             return None
 
-    def check_face_duplicate(self, query_embedding: List[float], exclude_username: str = None) -> Optional[Dict[str, any]]:
+    def check_face_duplicate(self, query_embedding: List[float], exclude_username: str = None, query_image: np.ndarray = None) -> Optional[Dict[str, any]]:
         """
-        Check if a face embedding matches any existing registered face.
+        Check if a face embedding matches any existing registered face using DeepFace verify().
         
         Args:
             query_embedding: Face embedding to check for duplicates
             exclude_username: Username to exclude from duplicate check (for updates)
+            query_image: Original face image for more accurate verification
             
         Returns:
             Dictionary with duplicate user info if found, None if no duplicate
         """
+        if not DEEPFACE_AVAILABLE:
+            return None
+        
         try:
             conn = sqlite3.connect(self.db_path)
             cursor = conn.cursor()
             
-            # Get all face embeddings from database, excluding the specified user if updating
+            # Get all face data from database, excluding the specified user if updating
             if exclude_username:
-                cursor.execute("SELECT username, first_name, last_name, embedding FROM faces WHERE username != ?", (exclude_username,))
+                cursor.execute("SELECT username, first_name, last_name, embedding, face_image FROM faces WHERE username != ?", (exclude_username,))
             else:
-                cursor.execute("SELECT username, first_name, last_name, embedding FROM faces")
+                cursor.execute("SELECT username, first_name, last_name, embedding, face_image FROM faces")
             faces = cursor.fetchall()
             conn.close()
             
@@ -845,12 +849,47 @@ class DeepFaceAuthenticator(BaseAuthenticator):
             
             query_embedding = np.array(query_embedding)
             
-            # Use stricter thresholds for duplicate detection
-            duplicate_euclidean_threshold = 0.8  # Much stricter than authentication threshold
-            duplicate_cosine_threshold = 0.05     # Much stricter than authentication threshold
-            
-            for username, first_name, last_name, embedding_str in faces:
+            for username, first_name, last_name, embedding_str, face_image_binary in faces:
                 try:
+                    # Use DeepFace verify() for more accurate comparison
+                    if query_image is not None and face_image_binary is not None:
+                        # Convert stored image binary back to image for verification
+                        stored_image = np.frombuffer(face_image_binary, np.uint8)
+                        stored_image = cv2.imdecode(stored_image, cv2.IMREAD_COLOR)
+                        
+                        if stored_image is not None:
+                            try:
+                                # Use DeepFace verify method for accurate comparison
+                                verification_result = DeepFace.verify(
+                                    img1_path=query_image,
+                                    img2_path=stored_image,
+                                    model_name=self.model_name,
+                                    detector_backend=self.detector_backend,
+                                    distance_metric='cosine',  # Use cosine distance as it's most reliable
+                                    enforce_detection=False,
+                                    normalization=self.normalization
+                                )
+                                
+                                # Check if faces are verified as the same person
+                                if verification_result.get('verified', False):
+                                    distance = verification_result.get('distance', 1.0)
+                                    threshold = verification_result.get('threshold', 0.40)
+                                    confidence = max(0, (1 - distance / threshold) * 100)
+                                    
+                                    return {
+                                        'duplicate_username': username,
+                                        'duplicate_first_name': first_name or '',
+                                        'duplicate_last_name': last_name or '',
+                                        'distance': distance,
+                                        'threshold': threshold,
+                                        'similarity_percentage': confidence,
+                                        'verification_method': 'deepface_verify'
+                                    }
+                            except Exception as verify_error:
+                                print(f"DeepFace verify failed for {username}, falling back to embedding comparison: {verify_error}")
+                                # Fall back to embedding comparison if verify fails
+                    
+                    # Fallback: Use embedding comparison with stricter thresholds
                     stored_embedding = np.array(json.loads(embedding_str))
                     
                     # Calculate euclidean distance
@@ -862,6 +901,10 @@ class DeepFaceAuthenticator(BaseAuthenticator):
                     )
                     cosine_distance = 1 - cosine_similarity
                     
+                    # Use stricter thresholds for duplicate detection (more sensitive than authentication)
+                    duplicate_euclidean_threshold = 0.6  # Stricter than authentication threshold
+                    duplicate_cosine_threshold = 0.03     # Stricter than authentication threshold
+                    
                     # Check if this is a duplicate using stricter thresholds
                     if (euclidean_distance <= duplicate_euclidean_threshold and 
                         cosine_distance <= duplicate_cosine_threshold):
@@ -872,7 +915,8 @@ class DeepFaceAuthenticator(BaseAuthenticator):
                             'duplicate_last_name': last_name or '',
                             'euclidean_distance': euclidean_distance,
                             'cosine_similarity': cosine_similarity,
-                            'similarity_percentage': (1 - cosine_distance) * 100
+                            'similarity_percentage': (1 - cosine_distance) * 100,
+                            'verification_method': 'embedding_fallback'
                         }
                         
                 except Exception as e:
@@ -885,14 +929,17 @@ class DeepFaceAuthenticator(BaseAuthenticator):
             print(f"Error checking face duplicates: {e}")
             return None
 
-    def find_face_match(self, query_embedding: List[float]) -> Optional[Dict[str, any]]:
-        """Find matching face in database using similarity search."""
+    def find_face_match(self, query_embedding: List[float], query_image: np.ndarray = None) -> Optional[Dict[str, any]]:
+        """Find matching face in database using DeepFace verify() method for accurate authentication."""
+        if not DEEPFACE_AVAILABLE:
+            return None
+        
         try:
             conn = sqlite3.connect(self.db_path)
             cursor = conn.cursor()
             
-            # Get all face embeddings from database including password data
-            cursor.execute("SELECT username, first_name, last_name, email, role, embedding, password_hash, salt FROM faces")
+            # Get all face data from database including password data and face images
+            cursor.execute("SELECT username, first_name, last_name, email, role, embedding, password_hash, salt, face_image FROM faces")
             faces = cursor.fetchall()
             conn.close()
             
@@ -904,8 +951,55 @@ class DeepFaceAuthenticator(BaseAuthenticator):
             
             query_embedding = np.array(query_embedding)
             
-            for username, first_name, last_name, email, role, embedding_str, password_hash, salt in faces:
+            for username, first_name, last_name, email, role, embedding_str, password_hash, salt, face_image_binary in faces:
                 try:
+                    # Primary method: Use DeepFace verify() for more accurate comparison
+                    if query_image is not None and face_image_binary is not None:
+                        # Convert stored image binary back to image for verification
+                        stored_image = np.frombuffer(face_image_binary, np.uint8)
+                        stored_image = cv2.imdecode(stored_image, cv2.IMREAD_COLOR)
+                        
+                        if stored_image is not None:
+                            try:
+                                # Use DeepFace verify method for accurate comparison
+                                verification_result = DeepFace.verify(
+                                    img1_path=query_image,
+                                    img2_path=stored_image,
+                                    model_name=self.model_name,
+                                    detector_backend=self.detector_backend,
+                                    distance_metric='cosine',  # Use cosine distance as it's most reliable
+                                    enforce_detection=False,
+                                    normalization=self.normalization
+                                )
+                                
+                                # Check if faces are verified as the same person
+                                if verification_result.get('verified', False):
+                                    distance = verification_result.get('distance', 1.0)
+                                    threshold = verification_result.get('threshold', 0.40)
+                                    confidence_score = max(0, (1 - distance / threshold) * 100)
+                                    
+                                    # Use distance as score (lower is better)
+                                    if distance < best_score:
+                                        best_match = {
+                                            'username': username,
+                                            'first_name': first_name or '',
+                                            'last_name': last_name or '',
+                                            'email': email or '',
+                                            'role': role or 'user',
+                                            'password_hash': password_hash,
+                                            'salt': salt,
+                                            'distance': distance,
+                                            'threshold': threshold,
+                                            'confidence_score': confidence_score,
+                                            'verification_method': 'deepface_verify'
+                                        }
+                                        best_score = distance
+                                    continue  # Skip embedding comparison if verify succeeded
+                            except Exception as verify_error:
+                                print(f"DeepFace verify failed for {username}, falling back to embedding comparison: {verify_error}")
+                                # Fall back to embedding comparison if verify fails
+                    
+                    # Fallback method: Use embedding comparison for compatibility
                     stored_embedding = np.array(json.loads(embedding_str))
                     
                     # Calculate euclidean distance
@@ -920,7 +1014,7 @@ class DeepFaceAuthenticator(BaseAuthenticator):
                     # Combined weighted score (you can adjust weights)
                     weighted_score = (0.7 * euclidean_distance) + (0.3 * cosine_distance)
                     
-                    # Check if this is the best match so far
+                    # Check if this is the best match so far using authentication thresholds
                     if (euclidean_distance <= self.euclidean_threshold and 
                         cosine_distance <= self.cosine_threshold and 
                         weighted_score < best_score):
@@ -935,7 +1029,8 @@ class DeepFaceAuthenticator(BaseAuthenticator):
                             'salt': salt,
                             'euclidean_distance': euclidean_distance,
                             'cosine_similarity': cosine_similarity,
-                            'weighted_score': weighted_score
+                            'weighted_score': weighted_score,
+                            'verification_method': 'embedding_fallback'
                         }
                         best_score = weighted_score
                         
@@ -963,7 +1058,7 @@ class DeepFaceAuthenticator(BaseAuthenticator):
             conn = sqlite3.connect(self.db_path)
             cursor = conn.cursor()
             
-            cursor.execute("SELECT username, first_name, last_name, embedding FROM faces ORDER BY username")
+            cursor.execute("SELECT username, first_name, last_name, embedding, face_image FROM faces ORDER BY username")
             faces = cursor.fetchall()
             conn.close()
             
@@ -971,27 +1066,74 @@ class DeepFaceAuthenticator(BaseAuthenticator):
                 return []
             
             duplicates = []
-            duplicate_euclidean_threshold = 0.8
-            duplicate_cosine_threshold = 0.05
             
             # Compare each face with every other face
-            for i, (username1, first_name1, last_name1, embedding_str1) in enumerate(faces):
-                for j, (username2, first_name2, last_name2, embedding_str2) in enumerate(faces[i+1:], i+1):
+            for i, (username1, first_name1, last_name1, embedding_str1, face_image1) in enumerate(faces):
+                for j, (username2, first_name2, last_name2, embedding_str2, face_image2) in enumerate(faces[i+1:], i+1):
                     try:
-                        embedding1 = np.array(json.loads(embedding_str1))
-                        embedding2 = np.array(json.loads(embedding_str2))
+                        # Try DeepFace verify first if both face images are available
+                        is_duplicate = False
+                        similarity_percentage = 0
+                        verification_method = 'embedding_fallback'
                         
-                        # Calculate similarity metrics
-                        euclidean_distance = np.linalg.norm(embedding1 - embedding2)
-                        cosine_similarity = np.dot(embedding1, embedding2) / (
-                            np.linalg.norm(embedding1) * np.linalg.norm(embedding2)
-                        )
-                        cosine_distance = 1 - cosine_similarity
+                        if face_image1 is not None and face_image2 is not None:
+                            try:
+                                # Convert stored image binaries back to images
+                                image1 = np.frombuffer(face_image1, np.uint8)
+                                image1 = cv2.imdecode(image1, cv2.IMREAD_COLOR)
+                                
+                                image2 = np.frombuffer(face_image2, np.uint8)
+                                image2 = cv2.imdecode(image2, cv2.IMREAD_COLOR)
+                                
+                                if image1 is not None and image2 is not None:
+                                    # Use DeepFace verify method
+                                    verification_result = DeepFace.verify(
+                                        img1_path=image1,
+                                        img2_path=image2,
+                                        model_name=self.model_name,
+                                        detector_backend=self.detector_backend,
+                                        distance_metric='cosine',
+                                        enforce_detection=False,
+                                        normalization=self.normalization
+                                    )
+                                    
+                                    # Use stricter threshold for duplicate detection
+                                    distance = verification_result.get('distance', 1.0)
+                                    threshold = verification_result.get('threshold', 0.40)
+                                    duplicate_threshold = threshold * 0.7  # More strict for duplicate detection
+                                    
+                                    if distance <= duplicate_threshold:
+                                        is_duplicate = True
+                                        similarity_percentage = max(0, (1 - distance / threshold) * 100)
+                                        verification_method = 'deepface_verify'
+                                    
+                            except Exception as verify_error:
+                                print(f"DeepFace verify failed for {username1} vs {username2}, falling back to embedding: {verify_error}")
                         
-                        # Check if these faces are duplicates
-                        if (euclidean_distance <= duplicate_euclidean_threshold and 
-                            cosine_distance <= duplicate_cosine_threshold):
+                        # Fallback to embedding comparison if DeepFace verify failed or unavailable
+                        if not is_duplicate:
+                            embedding1 = np.array(json.loads(embedding_str1))
+                            embedding2 = np.array(json.loads(embedding_str2))
                             
+                            # Calculate similarity metrics
+                            euclidean_distance = np.linalg.norm(embedding1 - embedding2)
+                            cosine_similarity = np.dot(embedding1, embedding2) / (
+                                np.linalg.norm(embedding1) * np.linalg.norm(embedding2)
+                            )
+                            cosine_distance = 1 - cosine_similarity
+                            
+                            # Use stricter thresholds for duplicate detection
+                            duplicate_euclidean_threshold = 0.6  # Stricter than authentication
+                            duplicate_cosine_threshold = 0.03    # Stricter than authentication
+                            
+                            # Check if these faces are duplicates
+                            if (euclidean_distance <= duplicate_euclidean_threshold and 
+                                cosine_distance <= duplicate_cosine_threshold):
+                                is_duplicate = True
+                                similarity_percentage = (1 - cosine_distance) * 100
+                        
+                        # Add to duplicates list if found
+                        if is_duplicate:
                             duplicates.append({
                                 'user1': {
                                     'username': username1,
@@ -1001,9 +1143,8 @@ class DeepFaceAuthenticator(BaseAuthenticator):
                                     'username': username2,
                                     'name': f"{first_name2 or ''} {last_name2 or ''}".strip()
                                 },
-                                'euclidean_distance': euclidean_distance,
-                                'cosine_similarity': cosine_similarity,
-                                'similarity_percentage': (1 - cosine_distance) * 100
+                                'similarity_percentage': similarity_percentage,
+                                'verification_method': verification_method
                             })
                             
                     except Exception as e:
