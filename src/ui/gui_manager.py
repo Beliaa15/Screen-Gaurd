@@ -53,6 +53,11 @@ class SecurityGUI:
         self.preview_label = None
         self.camera_thread_running = False
         
+        # Lighting check variables
+        self.lighting_check_active = False
+        self.lighting_check_timer = None
+        self.last_lighting_check = 0
+        
         # User management form variables
         self.username_var = tk.StringVar()
         self.first_name_var = tk.StringVar()
@@ -241,6 +246,70 @@ class SecurityGUI:
         combined_msg = " | ".join(messages)
         
         return all_ok, combined_msg
+    
+    def start_lighting_monitoring(self):
+        """Start periodic lighting condition monitoring"""
+        self.lighting_check_active = True
+        self.schedule_lighting_check()
+    
+    def stop_lighting_monitoring(self):
+        """Stop lighting condition monitoring"""
+        self.lighting_check_active = False
+        if self.lighting_check_timer:
+            self.root.after_cancel(self.lighting_check_timer)
+            self.lighting_check_timer = None
+    
+    def schedule_lighting_check(self):
+        """Schedule next lighting check with appropriate interval"""
+        if self.lighting_check_active:
+            self.lighting_check_timer = self.root.after(5000, self.perform_lighting_check)
+    
+    def perform_lighting_check(self):
+        """Perform a single lighting check without interfering with camera operations"""
+        if not self.lighting_check_active or self.current_screen != "deepface":
+            return
+            
+        try:
+            # Only check if camera is available and not heavily used
+            if self.camera_cap and not self.camera_thread_running:
+                ret, frame = self.camera_cap.read()
+                if ret and frame is not None:
+                    lighting_ok, msg = self.check_lighting_conditions(frame)
+                    self.update_lighting_status(lighting_ok, msg)
+            elif hasattr(self, 'lighting_status'):
+                # If camera is busy, show a neutral status
+                self.lighting_status.config(
+                    text="Lighting check paused - camera in use",
+                    fg=self.colors['on_surface']
+                )
+        except Exception as e:
+            print(f"Lighting check error: {e}")
+            if hasattr(self, 'lighting_status'):
+                self.lighting_status.config(
+                    text="Lighting check error",
+                    fg=self.colors['warning']
+                )
+        finally:
+            # Schedule next check
+            self.schedule_lighting_check()
+    
+    def update_lighting_status(self, lighting_ok, message):
+        """Update the lighting status display"""
+        if hasattr(self, 'lighting_status') and self.lighting_status:
+            try:
+                if lighting_ok:
+                    self.lighting_status.config(
+                        text=message,
+                        fg=self.colors['success']
+                    )
+                else:
+                    self.lighting_status.config(
+                        text=message,
+                        fg=self.colors['warning']
+                    )
+            except tk.TclError:
+                # Widget may have been destroyed
+                pass
         
     def create_modern_button(self, parent, text, command, style='Modern.TButton', **kwargs):
         """Create a modern styled button."""
@@ -329,6 +398,9 @@ class SecurityGUI:
         # Stop any active camera preview before clearing
         self.stop_camera_preview()
         
+        # Stop lighting monitoring when clearing screen
+        self.stop_lighting_monitoring()
+        
         for widget in self.root.winfo_children():
             widget.destroy()
         # Ensure security properties are maintained after clearing screen
@@ -397,7 +469,7 @@ class SecurityGUI:
             return False
     
     def start_camera_preview(self):
-        """Start the camera preview thread."""
+        """Start the camera preview thread with optimized performance."""
         if not self.camera_cap or self.camera_thread_running:
             return
             
@@ -406,16 +478,26 @@ class SecurityGUI:
         
         def camera_thread():
             frame_skip = 0
+            last_update_time = time.time()
+            
             while self.camera_thread_running and self.camera_cap:
                 try:
                     ret, frame = self.camera_cap.read()
                     if not ret:
+                        # If read fails, wait a bit before trying again
+                        time.sleep(0.1)
                         continue
                     
-                    # Skip frames to reduce CPU usage (process every 2nd frame)
+                    # Skip frames to reduce CPU usage (process every 3rd frame for better performance)
                     frame_skip += 1
-                    if frame_skip % 2 != 0:
+                    if frame_skip % 3 != 0:
                         continue
+                    
+                    # Limit update frequency to prevent overwhelming the GUI
+                    current_time = time.time()
+                    if current_time - last_update_time < 0.1:  # Max 10 FPS for preview
+                        continue
+                    last_update_time = current_time
                         
                     # Resize for display (smaller for better performance)
                     display_width = 320
@@ -432,20 +514,27 @@ class SecurityGUI:
                     # Update the preview label on main thread
                     if self.preview_label and self.camera_preview_active:
                         def update_preview():
-                            if self.preview_label and self.camera_preview_active:
-                                self.preview_label.configure(image=photo)
-                                self.preview_label.image = photo  # Keep a reference
+                            try:
+                                if self.preview_label and self.camera_preview_active:
+                                    self.preview_label.configure(image=photo)
+                                    self.preview_label.image = photo  # Keep a reference
+                            except tk.TclError:
+                                # Widget may have been destroyed
+                                pass
                         
                         self.root.after(0, update_preview)
                         
-                    # Dynamic sleep based on FPS setting
-                    time.sleep(1/Config.CAMERA_PREVIEW_FPS)
+                    # Adaptive sleep based on performance (longer sleep for better efficiency)
+                    time.sleep(0.05)  # 20 FPS max, but usually lower due to frame skipping
                     
                 except Exception as e:
                     print(f"Camera preview error: {e}")
+                    # Wait before retrying on error
+                    time.sleep(0.5)
                     break
                     
             self.camera_thread_running = False
+            print("Camera preview thread stopped")
             
         threading.Thread(target=camera_thread, daemon=True).start()
     
@@ -1454,25 +1543,8 @@ class SecurityGUI:
         )
         self.deepface_status.pack(pady=10)
 
-        def check_lighting_continuously():
-            if self.current_screen == "deepface" and self.camera_cap:
-                ret, frame = self.camera_cap.read()
-                if ret and frame is not None:
-                    lighting_ok, msg = self.check_lighting_conditions(frame)
-                    if lighting_ok:
-                        self.lighting_status.config(
-                            text=msg,
-                            fg=self.colors['success']
-                        )
-                    else:
-                        self.lighting_status.config(
-                            text=msg,
-                            fg=self.colors['warning']
-                        )
-                self.root.after(1000, check_lighting_continuously)
-            self.root.after(1500, check_lighting_continuously)
-        # Start continuous lighting check
-        self.root.after(1500, check_lighting_continuously)
+        # Start efficient lighting monitoring that doesn't interfere with camera
+        self.start_lighting_monitoring()
         
         # Buttons frame
         buttons_frame = tk.Frame(auth_content, bg=self.colors['card'])
@@ -1550,18 +1622,34 @@ class SecurityGUI:
         """Attempt DeepFace authentication with GUI integration."""
         if self.current_screen != "deepface":
             return
-         # Check lighting before proceeding
-        ret, frame = self.camera_cap.read()
-        if ret and frame is not None:
-            lighting_ok, msg = self.check_lighting_conditions(frame)
-            if not lighting_ok:
-                self.deepface_status.config(
-                    text=f"Cannot proceed: {msg}",
-                    fg=self.colors['danger']
-                )
-            return
+            
+        # Check lighting before proceeding (but don't block if camera is busy)
+        lighting_check_passed = True
+        if self.camera_cap and not self.camera_thread_running:
+            try:
+                ret, frame = self.camera_cap.read()
+                if ret and frame is not None:
+                    lighting_ok, msg = self.check_lighting_conditions(frame)
+                    if not lighting_ok:
+                        self.deepface_status.config(
+                            text=f"Lighting issue: {msg}",
+                            fg=self.colors['warning']
+                        )
+                        lighting_check_passed = False
+            except Exception as e:
+                print(f"Pre-auth lighting check failed: {e}")
+                # Continue anyway, lighting will be checked during authentication
+        
+        if not lighting_check_passed:
+            # Don't block authentication, just warn user
+            self.deepface_status.config(
+                text="Poor lighting detected - authentication may fail",
+                fg=self.colors['warning']
+            )
+            
         # Start with initializing models
-        self.deepface_status.config(text="Initializing AI models...", fg=self.colors['warning'])
+        self.root.after(1000, lambda: self.deepface_status.config(
+            text="Initializing AI models...", fg=self.colors['warning']))
         
         def auth_thread():
             try:
