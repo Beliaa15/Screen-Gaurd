@@ -174,6 +174,18 @@ class DeepFaceAuthenticator(BaseAuthenticator):
         except Exception as e:
             print(f"Error preprocessing image: {e}")
             return image
+    def is_lighting_ok(self, frame, low_thresh=90, high_thresh=170):
+        """Check if lighting conditions are acceptable"""
+        gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+        avg_brightness = np.mean(gray)
+        
+        if avg_brightness < low_thresh:
+            return False, "Too dark - please increase lighting"
+        elif avg_brightness > high_thresh:
+            return False, "Too bright - please reduce lighting"
+        else:
+            return True, "Lighting OK"
+
 
     def extract_face_embedding(self, image: np.ndarray) -> Tuple[Optional[List[float]], float]:
         """Extract face embedding using DeepFace."""
@@ -322,28 +334,27 @@ class DeepFaceAuthenticator(BaseAuthenticator):
             return False
 
     def capture_face_from_camera(self) -> Optional[np.ndarray]:
-        """Capture face from camera for registration."""
+        """Capture face from camera for registration with lighting checks."""
         cap = None
         max_retries = 3
         retry_delay = 1.0
-        
+
         # Try multiple camera backends to handle conflicts
         backends = [cv2.CAP_DSHOW, cv2.CAP_MSMF, cv2.CAP_ANY]
-        
+
         for backend in backends:
             for attempt in range(max_retries):
                 try:
                     print(f"Attempting to access camera (Backend: {backend}, Attempt: {attempt + 1}/{max_retries})")
                     cap = cv2.VideoCapture(Config.DEFAULT_CAMERA_INDEX, backend)
-                    
+
                     # Set camera properties for better stability
-                    cap.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
-                    cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
+                    cap.set(cv2.CAP_PROP_FRAME_WIDTH, 1280)
+                    cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 720)
                     cap.set(cv2.CAP_PROP_FPS, 15)
                     cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
-                    
+
                     if cap.isOpened():
-                        # Test if we can actually read a frame
                         ret, test_frame = cap.read()
                         if ret and test_frame is not None:
                             print("Camera access successful!")
@@ -357,20 +368,20 @@ class DeepFaceAuthenticator(BaseAuthenticator):
                         if cap:
                             cap.release()
                         cap = None
-                        
+
                 except Exception as e:
                     print(f"Camera access error: {e}")
                     if cap:
                         cap.release()
                     cap = None
-                
+
                 if cap is None and attempt < max_retries - 1:
                     print(f"Retrying in {retry_delay} seconds...")
                     time.sleep(retry_delay)
-            
+
             if cap is not None:
                 break
-        
+
         if cap is None:
             print("ERROR: Cannot access camera after all attempts.")
             print("Possible causes:")
@@ -378,161 +389,181 @@ class DeepFaceAuthenticator(BaseAuthenticator):
             print("- Camera driver issues")
             print("- Insufficient permissions")
             return None
-        
+
+        # Add initial lighting check
+        ret, test_frame = cap.read()
+        if ret:
+            lighting_ok, lighting_msg = self.is_lighting_ok(test_frame)
+            if not lighting_ok:
+                print(f"WARNING: {lighting_msg}")
+                # Optionally show warning to user immediately
+                cv2.imshow("Lighting Warning", test_frame)
+                cv2.putText(test_frame, lighting_msg, (10, 30), cv2.FONT_HERSHEY_SIMPLEX,
+                            0.7, (0, 0, 255), 2)
+                cv2.waitKey(2000)  # Show warning for 2 seconds
+                cv2.destroyWindow("Lighting Warning")
+
         print("Position your face in front of the camera and press SPACE to capture, ESC to cancel")
-        frame_count = 0
-        last_face_detected = False
         
+        frame_count = 0
+
+        last_face_detected = False
+
         while True:
             try:
                 ret, frame = cap.read()
                 if not ret or frame is None:
                     print("Warning: Frame read failed, retrying...")
                     continue
-                
+
                 frame_count += 1
-                
+
+                # Lighting check
+                lighting_ok, lighting_msg = self.is_lighting_ok(frame)
+                if not lighting_ok:
+                    cv2.putText(frame, lighting_msg, (10, 30), cv2.FONT_HERSHEY_SIMPLEX,
+                                0.7, (0, 0, 255), 2)  # Red warning
+                else:
+                    cv2.putText(frame, lighting_msg, (10, 30), cv2.FONT_HERSHEY_SIMPLEX,
+                                0.7, (0, 255, 0), 2)  # Green OK
+
                 # Show preview with face detection rectangle
                 try:
                     if frame_count % 5 == 0:  # Only check face every 5 frames for performance
-                        # Try to detect face for preview
-                        faces = DeepFace.extract_faces(frame, detector_backend=self.detector_backend, 
+                        faces = DeepFace.extract_faces(frame, detector_backend=self.detector_backend,
                                                      enforce_detection=False)
                         last_face_detected = faces and len(faces) > 0
-                    
+
                     if last_face_detected:
-                        # Draw rectangle around detected face area
                         h, w = frame.shape[:2]
-                        cv2.rectangle(frame, (w//4, h//4), (3*w//4, 3*h//4), (0, 255, 0), 2)
-                        cv2.putText(frame, "Face Detected - Press SPACE to capture", 
-                                  (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
+                        cv2.rectangle(frame, (w // 4, h // 4), (3 * w // 4, 3 * h // 4), (0, 255, 0), 2)
+                        cv2.putText(frame, "Face Detected - Press SPACE to capture",
+                                   (10, 60), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
                     else:
-                        cv2.putText(frame, "Position your face in the frame", 
-                                  (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 255), 2)
-                except Exception as e:
-                    # If face detection fails, just show the frame
-                    cv2.putText(frame, "Camera active - Press SPACE to capture", 
-                              (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2)
-                
-                cv2.putText(frame, "SPACE: Capture, ESC: Cancel", 
-                           (10, frame.shape[0] - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
-                
+                        cv2.putText(frame, "Position your face in the frame",
+                                   (10, 60), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 255), 2)
+                except Exception:
+                    cv2.putText(frame, "Camera active - Press SPACE to capture",
+                               (10, 60), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2)
+
+                cv2.putText(frame, "SPACE: Capture, ESC: Cancel",
+                            (10, frame.shape[0] - 10), cv2.FONT_HERSHEY_SIMPLEX,
+                            0.5, (255, 255, 255), 1)
+
                 cv2.imshow("Face Registration", frame)
-                
+
                 key = cv2.waitKey(1) & 0xFF
-                if key == ord(' '):  # Space to capture
+                if key == ord(' '):
                     print("Face captured!")
                     captured_frame = frame.copy()
                     cap.release()
                     cv2.destroyAllWindows()
                     return captured_frame
-                elif key == 27:  # ESC to cancel
+                elif key == 27:
                     print("Face capture cancelled")
                     break
-                    
+
             except Exception as e:
                 print(f"Error during camera capture: {e}")
                 break
-        
+
         cap.release()
         cv2.destroyAllWindows()
         return None
 
+
     def authenticate_face(self, timeout: int = 30) -> Optional[Dict[str, any]]:
-        """Authenticate using face recognition."""
+        """Authenticate using face recognition with enforced lighting check."""
         if not DEEPFACE_AVAILABLE:
             return None
-        
+
         cap = cv2.VideoCapture(Config.DEFAULT_CAMERA_INDEX)
         if not cap.isOpened():
+            print("ERROR: Camera could not be opened")
             return None
-        
+
         print(f"Face authentication started. Timeout: {timeout} seconds")
         start_time = time.time()
-        
+
         while True:
             ret, frame = cap.read()
             if not ret:
+                print("ERROR: Failed to read frame from camera")
                 break
-            
-            # Check timeout
+
             elapsed = time.time() - start_time
             if elapsed > timeout:
                 print("Face authentication timed out")
                 break
-            
+
+            # ---- Lighting check every frame ----
+            lighting_ok, lighting_msg = self.is_lighting_ok(frame)
+            print(f"[Lighting Check] {lighting_msg}")  # Debug print
+
+            if not lighting_ok:
+                # Show warning overlay
+                cv2.putText(frame, lighting_msg, (10, 30), cv2.FONT_HERSHEY_SIMPLEX,
+                            0.7, (0, 0, 255), 2)
+                cv2.imshow("Face Authentication", frame)
+
+                # Skip face detection until lighting is OK
+                if cv2.waitKey(1) & 0xFF == 27:
+                    break
+                continue
+            else:
+                cv2.putText(frame, lighting_msg, (10, 30), cv2.FONT_HERSHEY_SIMPLEX,
+                            0.7, (0, 255, 0), 2)
+
+            # ---- Face embedding extraction ----
             try:
-                # Extract face embedding from current frame
                 embedding, confidence = self.extract_face_embedding(frame)
-                
+
                 if embedding is None or confidence < self.confidence_threshold:
-                    # Show frame with status
                     status_text = "No face detected" if embedding is None else f"Low confidence: {confidence:.2f}"
-                    cv2.putText(frame, status_text, (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 255), 2)
-                    cv2.putText(frame, f"Time left: {timeout - int(elapsed)}s", 
-                              (10, 60), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
+                    cv2.putText(frame, status_text, (10, 60), cv2.FONT_HERSHEY_SIMPLEX,
+                                0.7, (0, 0, 255), 2)
+                    cv2.putText(frame, f"Time left: {timeout - int(elapsed)}s",
+                                (10, 90), cv2.FONT_HERSHEY_SIMPLEX, 0.5,
+                                (255, 255, 255), 1)
                     cv2.imshow("Face Authentication", frame)
-                    
-                    if cv2.waitKey(1) & 0xFF == 27:  # ESC to cancel
+
+                    if cv2.waitKey(1) & 0xFF == 27:
                         break
                     continue
-                
-                # Search for matching face in database
+
                 match_result = self.find_face_match(embedding)
-                
+
                 if match_result:
                     cap.release()
                     cv2.destroyAllWindows()
-                    
-                    # Try LDAP authentication with stored credentials
-                    username = match_result['username']
-                    password_hash = match_result.get('password_hash')
-                    salt = match_result.get('salt')
-                    
-                    if password_hash and salt:
-                        # We need the original password to authenticate with LDAP
-                        # Since we can't decrypt the hash, we'll use a different approach
-                        # For now, let's try to authenticate with the username only
-                        # In a real scenario, you might want to implement a separate password prompt
-                        print(f"Face recognized as {username}, attempting LDAP authentication...")
-                        
-                        # Note: Since we store encrypted passwords, we can't retrieve the original
-                        # In a production system, you might want to:
-                        # 1. Prompt for password after face recognition
-                        # 2. Use cached credentials if previously entered
-                        # 3. Use certificate-based authentication
-                        
-                        # For now, we'll return the match and let the caller handle LDAP auth
-                        SecurityUtils.log_security_event("DEEPFACE_AUTH_SUCCESS", 
-                                                       f"Face authentication successful for: {username}")
-                        return match_result
-                    else:
-                        print(f"No stored credentials for {username}")
-                        SecurityUtils.log_security_event("DEEPFACE_AUTH_SUCCESS", 
-                                                       f"Face authentication successful for: {username} (no stored credentials)")
-                        return match_result
-                
-                # Show frame with authentication status
-                cv2.putText(frame, f"Face detected (conf: {confidence:.2f})", 
-                          (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
-                cv2.putText(frame, "Searching for match...", 
-                          (10, 60), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 0), 1)
-                cv2.putText(frame, f"Time left: {timeout - int(elapsed)}s", 
-                          (10, 90), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
-                
+                    SecurityUtils.log_security_event("DEEPFACE_AUTH_SUCCESS",
+                                                     f"Face authentication successful for: {match_result['username']}")
+                    return match_result
+
+                cv2.putText(frame, f"Face detected (conf: {confidence:.2f})",
+                            (10, 60), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
+                cv2.putText(frame, "Searching for match...",
+                            (10, 90), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 0), 1)
+                cv2.putText(frame, f"Time left: {timeout - int(elapsed)}s",
+                            (10, 120), cv2.FONT_HERSHEY_SIMPLEX, 0.5,
+                            (255, 255, 255), 1)
+
             except Exception as e:
                 print(f"Error during face authentication: {e}")
-                cv2.putText(frame, f"Error: {str(e)[:50]}", 
-                          (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 255), 1)
-            
+                cv2.putText(frame, f"Error: {str(e)[:50]}",
+                            (10, 60), cv2.FONT_HERSHEY_SIMPLEX, 0.5,
+                            (0, 0, 255), 1)
+
             cv2.imshow("Face Authentication", frame)
-            if cv2.waitKey(1) & 0xFF == 27:  # ESC to cancel
+            if cv2.waitKey(1) & 0xFF == 27:
                 break
-        
+
         cap.release()
         cv2.destroyAllWindows()
         SecurityUtils.log_security_event("DEEPFACE_AUTH_FAILED", "Face authentication failed or cancelled")
         return None
+
+
 
     def authenticate_face_with_ldap(self, timeout: int = 30) -> Optional[Dict[str, any]]:
         """Authenticate using face recognition and then LDAP authentication."""
