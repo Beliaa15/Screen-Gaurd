@@ -14,6 +14,14 @@ from pathlib import Path
 import cv2
 from PIL import Image, ImageTk
 
+# Try to import Windows-specific modules for click-through functionality
+try:
+    import win32gui
+    import win32con
+    WIN32_AVAILABLE = True
+except ImportError:
+    WIN32_AVAILABLE = False
+
 from ..core.config import Config
 from ..utils.security_utils import SecurityUtils
 from ..auth.ldap_auth import LDAPAuthenticator
@@ -55,6 +63,11 @@ class SecurityGUI:
         self.selected_image_path = ""
         self.ldap_user_var = tk.StringVar()
         self.ldap_pass_var = tk.StringVar()
+        
+        # Watermark overlay variables
+        self.watermark_window = None
+        self.watermark_active = False
+        self.watermark_update_timer = None
         
         # Setup modern theme
         self.setup_modern_theme()
@@ -1720,6 +1733,9 @@ class SecurityGUI:
         self.is_authenticated = True
         self.current_user = username
         self.current_role = role
+        
+        # Refresh watermark if it's active with new user information
+        self.refresh_watermark_if_active()
         
         SecurityUtils.log_security_event("GUI_AUTH_SUCCESS", f"GUI authentication successful for user: {username}")
         
@@ -3426,8 +3442,404 @@ class SecurityGUI:
         self.logs_output.delete(1.0, tk.END)
         self.logs_output.insert(tk.END, message + "\n")
     
+    def create_watermark_overlay(self):
+        """Create a transparent watermark overlay with LDAP user information - like example.py."""
+        if self.watermark_window is not None:
+            return  # Already exists
+            
+        try:
+            # Create watermark window exactly like example.py
+            self.watermark_window = tk.Toplevel(self.root)
+            self.watermark_window.title("")
+            self.watermark_window.overrideredirect(True)  # Remove window decorations
+            
+            # Get screen dimensions
+            screen_width = self.watermark_window.winfo_screenwidth()
+            screen_height = self.watermark_window.winfo_screenheight()
+            
+            # Set window to cover entire screen
+            self.watermark_window.geometry(f"{screen_width}x{screen_height}+0+0")
+            
+            # Configure transparency exactly like example.py
+            self.watermark_window.configure(bg='white')  # Use white background for transparency
+            self.watermark_window.wm_attributes("-transparentcolor", "white")  # Make white transparent
+            self.watermark_window.wm_attributes("-alpha", 0.4)  # Set opacity like example
+            self.watermark_window.wm_attributes("-topmost", True)  # Always on top
+            
+            # Lift window to front
+            self.watermark_window.lift()
+            
+            # Prevent window from being closed
+            self.watermark_window.protocol("WM_DELETE_WINDOW", lambda: None)
+            
+            # Create watermark content
+            self.create_watermark_content()
+            
+            self.watermark_active = True
+            SecurityUtils.log_security_event("WATERMARK_CREATED", f"Security watermark overlay created for user: {self.current_user}")
+            print("✓ Watermark overlay created with transparent background (like example.py)")
+            
+        except Exception as e:
+            print(f"Error creating watermark overlay: {e}")
+            SecurityUtils.log_security_event("WATERMARK_ERROR", f"Error creating watermark: {e}")
+            # Clean up on error
+            if hasattr(self, 'watermark_window') and self.watermark_window:
+                try:
+                    self.watermark_window.destroy()
+                except:
+                    pass
+                self.watermark_window = None
+                self.watermark_active = False
+    
+    def setup_watermark_event_passthrough(self):
+        """Setup fallback event passthrough for watermark window when win32gui is not available."""
+        if not self.watermark_window:
+            return
+            
+        # Configure window to not accept focus and ignore events
+        try:
+            # Make window not focusable
+            self.watermark_window.attributes('-type', 'desktop')
+        except tk.TclError:
+            # Not supported on all platforms, try alternative
+            pass
+        
+        # Bind all interactive events to be ignored/passed through
+        def ignore_event(event):
+            return "break"
+        
+        # Bind mouse events to ignore them
+        events_to_ignore = [
+            '<Button-1>', '<Button-2>', '<Button-3>',
+            '<ButtonRelease-1>', '<ButtonRelease-2>', '<ButtonRelease-3>',
+            '<Double-Button-1>', '<Double-Button-2>', '<Double-Button-3>',
+            '<Motion>', '<Enter>', '<Leave>',
+            '<Key>', '<KeyPress>', '<KeyRelease>',
+            '<FocusIn>', '<FocusOut>',
+            '<MouseWheel>', '<Button-4>', '<Button-5>'
+        ]
+        
+        for event in events_to_ignore:
+            self.watermark_window.bind(event, ignore_event)
+        
+        # Also bind events to all child widgets
+        def bind_children(widget):
+            for child in widget.winfo_children():
+                for event in events_to_ignore:
+                    child.bind(event, ignore_event)
+                bind_children(child)
+        
+        bind_children(self.watermark_window)
+        
+        # Lower the window below other windows periodically to reduce interference
+        def lower_window():
+            if self.watermark_active and self.watermark_window:
+                try:
+                    # Lower the window but keep it topmost
+                    self.watermark_window.lower()
+                    self.watermark_window.attributes("-topmost", True)
+                    # Schedule next lowering
+                    self.root.after(1000, lower_window)
+                except:
+                    pass
+        
+        # Start the lowering process
+        self.root.after(100, lower_window)
+        
+        print("✓ Watermark configured with enhanced event passthrough fallback")
+
+    def create_watermark_content(self):
+        """Create the content for the watermark overlay - all labels organized in the center."""
+        if not self.watermark_window:
+            return
+            
+        # Get current system and user information
+        sys_info = SecurityUtils.get_system_info()
+        
+        # Get LDAP user details if available
+        user_details = self.get_current_user_details()
+        
+        # Create main center container for all watermark content
+        main_container = tk.Frame(self.watermark_window, bg='#000000', highlightthickness=2, highlightbackground='white')
+        main_container.place(relx=0.5, rely=0.5, anchor='center')
+        
+        # Title section - System Logo and Main Title
+        title_section = tk.Frame(main_container, bg='#000000')
+        title_section.pack(pady=(15, 10))
+        
+        # Large security icon
+        center_logo = tk.Label(
+            title_section,
+            text="🔒",
+            fg='lightgray',
+            bg='#000000',
+            font=("Segoe UI", 80, "bold")
+        )
+        center_logo.pack()
+        
+        # Main title
+        main_title = tk.Label(
+            title_section,
+            text="PHYSICAL SECURITY SYSTEM",
+            fg='white',
+            bg='#000000',
+            font=("Segoe UI", 20, "bold"),
+            justify='center'
+        )
+        main_title.pack()
+        
+        # Subtitle
+        subtitle = tk.Label(
+            title_section,
+            text="MONITORING ACTIVE",
+            fg='yellow',
+            bg='#000000',
+            font=("Segoe UI", 14, "bold"),
+            justify='center'
+        )
+        subtitle.pack(pady=(5, 0))
+        
+        # User Information Section
+        user_section = tk.Frame(main_container, bg='#000000')
+        user_section.pack(pady=10, padx=20, fill='x')
+        
+        user_title = tk.Label(
+            user_section,
+            text="👤 AUTHENTICATED USER",
+            fg='cyan',
+            bg='#000000',
+            font=("Segoe UI", 12, "bold"),
+            justify='center'
+        )
+        user_title.pack()
+        
+        user_info_text = f"User: {user_details['display_name']}\nRole: {user_details['role'].upper()}\nDomain: {user_details['domain']}"
+        if user_details['email']:
+            user_info_text += f"\nEmail: {user_details['email']}"
+            
+        user_info = tk.Label(
+            user_section,
+            text=user_info_text,
+            fg='white',
+            bg='#000000',
+            font=("Segoe UI", 10, "normal"),
+            justify='center'
+        )
+        user_info.pack(pady=(5, 0))
+        
+        # System Status Section
+        status_section = tk.Frame(main_container, bg='#000000')
+        status_section.pack(pady=10, padx=20, fill='x')
+        
+        status_title = tk.Label(
+            status_section,
+            text="� SYSTEM STATUS",
+            fg='lightgreen',
+            bg='#000000',
+            font=("Segoe UI", 12, "bold"),
+            justify='center'
+        )
+        status_title.pack()
+        
+        status_info = tk.Label(
+            status_section,
+            text=f"Detection: RUNNING\nTimestamp: {sys_info['timestamp']}",
+            fg='white',
+            bg='#000000',
+            font=("Segoe UI", 10, "normal"),
+            justify='center'
+        )
+        status_info.pack(pady=(5, 0))
+        
+        # System Information Section
+        system_section = tk.Frame(main_container, bg='#000000')
+        system_section.pack(pady=10, padx=20, fill='x')
+        
+        system_title = tk.Label(
+            system_section,
+            text="💻 SYSTEM INFORMATION",
+            fg='orange',
+            bg='#000000',
+            font=("Segoe UI", 12, "bold"),
+            justify='center'
+        )
+        system_title.pack()
+        
+        system_info = tk.Label(
+            system_section,
+            text=f"Computer: {sys_info['computer_name']}\nIP Address: {sys_info['ip_address']}\nOS User: {sys_info['username']}",
+            fg='white',
+            bg='#000000',
+            font=("Segoe UI", 10, "normal"),
+            justify='center'
+        )
+        system_info.pack(pady=(5, 0))
+        
+        # Security Notice Section
+        security_section = tk.Frame(main_container, bg='#000000')
+        security_section.pack(pady=(10, 15), padx=20, fill='x')
+        
+        security_title = tk.Label(
+            security_section,
+            text="⚠️ SECURITY NOTICE",
+            fg='red',
+            bg='#000000',
+            font=("Segoe UI", 12, "bold"),
+            justify='center'
+        )
+        security_title.pack()
+        
+        security_notice = tk.Label(
+            security_section,
+            text="All activities are being recorded\nUnauthorized access is prohibited",
+            fg='white',
+            bg='#000000',
+            font=("Segoe UI", 10, "normal"),
+            justify='center'
+        )
+        security_notice.pack(pady=(5, 0))
+        
+        # Schedule periodic updates
+        self.schedule_watermark_update()
+    
+    def get_current_user_details(self):
+        """Get detailed information about the current authenticated user."""
+        details = {
+            'display_name': self.current_user or 'Unknown User',
+            'role': self.current_role or 'unknown',
+            'domain': 'Local',
+            'email': None
+        }
+        
+        # Try to get additional LDAP information
+        if self.current_user and self.ldap_auth:
+            try:
+                ldap_info = self.ldap_auth.get_user_info(self.current_user)
+                if ldap_info:
+                    details['display_name'] = ldap_info.get('display_name', self.current_user)
+                    details['email'] = ldap_info.get('email')
+                    details['domain'] = self.ldap_auth.base_dn
+            except Exception as e:
+                print(f"Could not fetch LDAP details: {e}")
+                
+        return details
+    
+    def schedule_watermark_update(self):
+        """Schedule periodic updates of the watermark content."""
+        if self.watermark_active and self.watermark_window:
+            # Update every 30 seconds
+            self.watermark_update_timer = self.root.after(30000, self.update_watermark_content)
+    
+    def update_watermark_content(self):
+        """Update the watermark content with current information."""
+        if not self.watermark_active or not self.watermark_window:
+            return
+            
+        try:
+            # Check if window still exists
+            if not self.watermark_window.winfo_exists():
+                self.watermark_active = False
+                self.watermark_window = None
+                return
+                
+            # Clear existing content
+            for widget in self.watermark_window.winfo_children():
+                widget.destroy()
+                
+            # Recreate content with updated information
+            self.create_watermark_content()
+            
+            # Ensure window remains on top and properly configured
+            self.watermark_window.lift()
+            self.watermark_window.attributes("-topmost", True)
+            
+        except tk.TclError:
+            # Window was destroyed externally
+            self.watermark_active = False
+            self.watermark_window = None
+        except Exception as e:
+            print(f"Error updating watermark: {e}")
+            
+        # Schedule next update only if watermark is still active
+        if self.watermark_active:
+            self.schedule_watermark_update()
+    
+    def show_watermark_overlay(self):
+        """Show the transparent watermark overlay."""
+        if not self.watermark_active:
+            self.create_watermark_overlay()
+        elif self.watermark_window and self.watermark_window.winfo_exists():
+            # If watermark exists but might be hidden, bring it to front
+            self.watermark_window.lift()
+            self.watermark_window.attributes("-topmost", True)
+            print("✓ Watermark overlay brought to front")
+            
+
+    def hide_watermark_overlay(self):
+        """Hide the transparent watermark overlay."""
+        try:
+            # Cancel any pending updates first
+            if self.watermark_update_timer:
+                try:
+                    self.root.after_cancel(self.watermark_update_timer)
+                except:
+                    pass
+                self.watermark_update_timer = None
+                
+            # Set flag to prevent new operations
+            self.watermark_active = False
+            
+            # Destroy window if it exists
+            if self.watermark_window:
+                try:
+                    if self.watermark_window.winfo_exists():
+                        self.watermark_window.destroy()
+                except tk.TclError:
+                    # Window already destroyed
+                    pass
+                self.watermark_window = None
+                
+            SecurityUtils.log_security_event("WATERMARK_HIDDEN", f"Security watermark overlay hidden for user: {self.current_user}")
+            print("✓ Watermark overlay hidden")
+            
+        except Exception as e:
+            print(f"Error hiding watermark: {e}")
+            # Ensure variables are reset even on error
+            self.watermark_active = False
+            self.watermark_window = None
+            self.watermark_update_timer = None
+    
+    def refresh_watermark_if_active(self):
+        """Refresh watermark content if it's currently active."""
+        if not self.watermark_active or not self.watermark_window:
+            return
+            
+        try:
+            # Check if window still exists
+            if not self.watermark_window.winfo_exists():
+                self.watermark_active = False
+                self.watermark_window = None
+                return
+                
+            # Clear and recreate content
+            for widget in self.watermark_window.winfo_children():
+                widget.destroy()
+            self.create_watermark_content()
+            
+            # Ensure window properties are maintained
+            self.watermark_window.lift()
+            self.watermark_window.attributes("-topmost", True)
+            
+            print("✓ Watermark content refreshed")
+        except tk.TclError:
+            # Window was destroyed externally
+            self.watermark_active = False
+            self.watermark_window = None
+        except Exception as e:
+            print(f"Error refreshing watermark: {e}")
+
     def minimize_to_system_tray(self):
-        """Minimize GUI to system tray and start detection system."""
+        """Minimize GUI to system tray, start detection system, and show watermark overlay."""
         self.is_minimized = True
         self.root.iconify()
         
@@ -3435,22 +3847,28 @@ class SecurityGUI:
         if self.detector_service and not self.detection_running:
             self.start_detection_system()
         
-        SecurityUtils.log_security_event("GUI_MINIMIZED", f"User {self.current_user} minimized GUI to system tray - detection started")
-        print("🔽 GUI minimized to system tray. Detection system started.")
+        # Show watermark overlay when system is minimized and monitoring
+        self.show_watermark_overlay()
+        
+        SecurityUtils.log_security_event("GUI_MINIMIZED", f"User {self.current_user} minimized GUI to system tray - detection and watermark started")
+        print("🔽 GUI minimized to system tray. Detection system and watermark overlay started.")
     
     def restore_from_tray(self):
-        """Restore GUI from system tray and stop detection system."""
+        """Restore GUI from system tray, stop detection system, and hide watermark overlay."""
         self.is_minimized = False
         self.root.deiconify()
         self.root.lift()
         self.root.focus_force()
         
+        # Hide watermark overlay when GUI is restored
+        self.hide_watermark_overlay()
+        
         # Stop detection system when GUI is restored
         if self.detector_service and self.detection_running:
             self.stop_detection_system()
         
-        SecurityUtils.log_security_event("GUI_RESTORED", f"User {self.current_user} restored GUI from system tray - detection stopped")
-        print("🔼 GUI restored from system tray. Detection system stopped.")
+        SecurityUtils.log_security_event("GUI_RESTORED", f"User {self.current_user} restored GUI from system tray - detection and watermark stopped")
+        print("🔼 GUI restored from system tray. Detection system and watermark overlay stopped.")
     
     def start_detection_system(self):
         """Start the detection system in a separate thread."""
@@ -3530,6 +3948,13 @@ class SecurityGUI:
                 current_user_temp = self.current_user  # Store for logging
                 self.current_user = None
                 self.current_role = None
+                
+                # Hide watermark overlay on logout
+                self.hide_watermark_overlay()
+                
+                # Stop detection system if running
+                if self.detection_running:
+                    self.stop_detection_system()
                 
                 if self.auth_manager:
                     self.auth_manager.logout()
