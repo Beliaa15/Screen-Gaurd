@@ -5,18 +5,22 @@ Modern themed interface with enhanced visual design.
 """
 
 import tkinter as tk
-from tkinter import ttk, filedialog, messagebox
+from tkinter import ttk, filedialog
 import threading
 import time
 import os
 from datetime import datetime
-import subprocess
-import sys
 from pathlib import Path
-from typing import Dict, Optional, Tuple
 import cv2
-import numpy as np
 from PIL import Image, ImageTk
+
+# Try to import Windows-specific modules for click-through functionality
+try:
+    import win32gui
+    import win32con
+    WIN32_AVAILABLE = True
+except ImportError:
+    WIN32_AVAILABLE = False
 
 from ..core.config import Config
 from ..utils.security_utils import SecurityUtils
@@ -60,12 +64,61 @@ class SecurityGUI:
         self.ldap_user_var = tk.StringVar()
         self.ldap_pass_var = tk.StringVar()
         
+        # Watermark overlay variables
+        self.watermark_window = None
+        self.watermark_active = False
+        self.watermark_update_timer = None
+        
         # Setup modern theme
         self.setup_modern_theme()
         
         # Configure main window
         self.setup_window()
         
+    def safe_widget_config(self, widget, **config_options):
+        """Safely configure a widget, checking if it still exists."""
+        try:
+            if widget and widget.winfo_exists():
+                widget.config(**config_options)
+        except tk.TclError:
+            pass  # Widget was destroyed, ignore the error
+    
+    def safe_after_callback(self, delay, callback):
+        """Schedule a callback safely with widget existence checks."""
+        def safe_callback():
+            try:
+                callback()
+            except tk.TclError:
+                pass  # Widget was destroyed, ignore the error
+        
+        return self.root.after(delay, safe_callback)
+    
+    def cancel_all_pending_callbacks(self):
+        """Cancel all pending after callbacks to prevent widget access errors."""
+        # Cancel auto-start timer if it exists
+        if hasattr(self, 'auto_start_timer'):
+            try:
+                self.root.after_cancel(self.auto_start_timer)
+            except:
+                pass
+        
+        # Note: We can't cancel all pending callbacks since tkinter doesn't provide
+        # a way to do this, but our safe callbacks will handle destroyed widgets gracefully
+    
+    def clear_screen(self):
+        """Clear all widgets from the root window and maintain security properties."""
+        # Cancel any pending callbacks first
+        self.cancel_all_pending_callbacks()
+        
+        # Stop any active camera preview before clearing
+        self.stop_camera_preview()
+        
+        for widget in self.root.winfo_children():
+            widget.destroy()
+        
+        # Ensure security properties are maintained after clearing screen
+        self.maintain_security_properties()
+    
     def setup_modern_theme(self):
         """Setup modern theme and colors for the GUI."""
         self.style = ttk.Style()
@@ -214,10 +267,6 @@ class SecurityGUI:
         # Setup window event handlers
         self.setup_window_events()
         
-    def create_modern_button(self, parent, text, command, style='Modern.TButton', **kwargs):
-        """Create a modern styled button."""
-        return ttk.Button(parent, text=text, command=command, style=style, **kwargs)
-    
     def create_modern_entry(self, parent, textvariable=None, show=None, width=None, **kwargs):
         """Create a modern styled entry widget that returns the actual entry."""        
         # Create the actual entry widget with modern styling
@@ -239,56 +288,6 @@ class SecurityGUI:
         # Return the actual entry widget
         return entry
     
-    def create_gradient_frame(self, parent, color1, color2, height=100):
-        """Create a gradient-like frame using canvas."""
-        canvas = tk.Canvas(parent, height=height, highlightthickness=0, bd=0, relief='flat')
-        canvas.pack(fill='x')
-        
-        def hex_to_rgb(hex_color):
-            """Convert hex color to RGB tuple."""
-            hex_color = hex_color.lstrip('#')
-            return tuple(int(hex_color[i:i+2], 16) for i in (0, 2, 4))
-        
-        def rgb_to_hex(rgb):
-            """Convert RGB tuple to hex color."""
-            return "#{:02x}{:02x}{:02x}".format(int(rgb[0]), int(rgb[1]), int(rgb[2]))
-        
-        def interpolate_color(color1, color2, ratio):
-            """Interpolate between two colors."""
-            rgb1 = hex_to_rgb(color1)
-            rgb2 = hex_to_rgb(color2)
-            
-            r = rgb1[0] + (rgb2[0] - rgb1[0]) * ratio
-            g = rgb1[1] + (rgb2[1] - rgb1[1]) * ratio
-            b = rgb1[2] + (rgb2[2] - rgb1[2]) * ratio
-            
-            return rgb_to_hex((r, g, b))
-        
-        def draw_gradient():
-            width = canvas.winfo_width()
-            if width > 1:
-                canvas.delete("all")
-                # Create smooth gradient with more steps for better quality
-                steps = min(height, 100)  # Limit steps for performance
-                step_height = height / steps
-                
-                for i in range(steps):
-                    y1 = int(i * step_height)
-                    y2 = int((i + 1) * step_height)
-                    ratio = i / (steps - 1) if steps > 1 else 0
-                    
-                    gradient_color = interpolate_color(color1, color2, ratio)
-                    canvas.create_rectangle(0, y1, width, y2, 
-                                          fill=gradient_color, outline=gradient_color)
-        
-        # Bind the gradient drawing to canvas configuration
-        canvas.bind('<Configure>', lambda e: canvas.after_idle(draw_gradient))
-        
-        # Draw initial gradient
-        canvas.after_idle(draw_gradient)
-        
-        return canvas
-        
     def maintain_security_properties(self):
         """Ensure security properties are maintained - call this periodically."""
         # Reapply security properties in case they were somehow modified
@@ -321,12 +320,6 @@ class SecurityGUI:
             return True  # Already initialized
             
         try:
-            # Try initializing camera with timeout
-            import signal
-            
-            def timeout_handler(signum, frame):
-                raise TimeoutError("Camera initialization timeout")
-                
             # Set up timeout (Windows doesn't support SIGALRM, so we'll use a different approach)
             start_time = time.time()
             
@@ -582,10 +575,6 @@ class SecurityGUI:
         self.show_startup_screen()
         self.root.mainloop()
     
-    def is_ready_for_detection(self):
-        """Check if GUI is ready for detection system to start."""
-        return self.is_authenticated
-    
     def show_startup_screen(self):
         """Show the modern startup screen with loading animation."""
         self.clear_screen()
@@ -696,7 +685,7 @@ class SecurityGUI:
         self.show_startup_progress()
 
         # Auto-proceed to login after 3 seconds (increased for better UX)
-        self.root.after(3000, self.show_login_screen)
+        self.safe_after_callback(3000, self.show_login_screen)
     
     def show_startup_progress(self):
         """Show progressive startup status updates."""
@@ -747,25 +736,6 @@ class SecurityGUI:
         
         # Start animation on main thread
         self.root.after(100, update_dots)
-        
-    def animate_loading(self):
-        """Animate loading dots."""
-        self.loading_step = 0
-        
-        def update_dots():
-            if self.current_screen != "startup" or self.loading_step >= 4:
-                return
-                
-            if hasattr(self, 'progress_label'):
-                dots = "." * self.loading_step
-                self.progress_label.config(text=dots)
-            
-            self.loading_step += 1
-            # Schedule next update on main thread
-            self.root.after(500, update_dots)
-        
-        # Start animation on main thread
-        self.root.after(100, update_dots)
     
     def show_login_screen(self):
         """Show the modern login/authentication screen."""
@@ -810,7 +780,7 @@ class SecurityGUI:
         self.create_modern_auth_buttons(methods_card)
 
         # Auto-start face recognition after 10 seconds
-        self.auto_start_timer = self.root.after(10000, lambda: self.auto_start_face_recognition())
+        self.auto_start_timer = self.safe_after_callback(10000, lambda: self.auto_start_face_recognition())
         
         # Add countdown indicator
         self.countdown_label = tk.Label(
@@ -889,14 +859,37 @@ class SecurityGUI:
         
         # Add prominent hover effects and click animation
         def on_enter_deep(e):
-            deepface_btn.config(bg=self.colors['primary_light'], font=("Segoe UI", 16, "bold"))
-            badge_label.config(fg=self.colors['primary_light'])
+            try:
+                if deepface_btn.winfo_exists():
+                    deepface_btn.config(bg=self.colors['primary_light'], font=("Segoe UI", 16, "bold"))
+                if badge_label.winfo_exists():
+                    badge_label.config(fg=self.colors['primary_light'])
+            except tk.TclError:
+                pass  # Widget was destroyed
+                
         def on_leave_deep(e):
-            deepface_btn.config(bg=self.colors['warning'], font=("Segoe UI", 16, "bold"))
-            badge_label.config(fg=self.colors['warning'])
+            try:
+                if deepface_btn.winfo_exists():
+                    deepface_btn.config(bg=self.colors['warning'], font=("Segoe UI", 16, "bold"))
+                if badge_label.winfo_exists():
+                    badge_label.config(fg=self.colors['warning'])
+            except tk.TclError:
+                pass  # Widget was destroyed
+                
         def on_click_deep(e):
-            deepface_btn.config(bg=self.colors['secondary'])
-            self.root.after(100, lambda: deepface_btn.config(bg=self.colors['primary_light']))
+            try:
+                if deepface_btn.winfo_exists():
+                    deepface_btn.config(bg=self.colors['secondary'])
+                    # Safe delayed callback with widget existence check
+                    def safe_restore():
+                        try:
+                            if deepface_btn.winfo_exists():
+                                deepface_btn.config(bg=self.colors['primary_light'])
+                        except tk.TclError:
+                            pass  # Widget was destroyed
+                    self.root.after(100, safe_restore)
+            except tk.TclError:
+                pass  # Widget was destroyed
         
         deepface_btn.bind("<Enter>", on_enter_deep)
         deepface_btn.bind("<Leave>", on_leave_deep)
@@ -954,7 +947,8 @@ class SecurityGUI:
             if self.current_screen != "login" or self.countdown_seconds <= 0:
                 return
             
-            self.countdown_label.config(text=f"Face recognition will start automatically in {self.countdown_seconds} seconds...")
+            self.safe_widget_config(self.countdown_label, 
+                                  text=f"Face recognition will start automatically in {self.countdown_seconds} seconds...")
             self.countdown_seconds -= 1
             
             # Schedule next update
@@ -963,7 +957,7 @@ class SecurityGUI:
             else:
                 # Hide countdown when done
                 if hasattr(self, 'countdown_label'):
-                    self.countdown_label.config(text="Starting face recognition...")
+                    self.safe_widget_config(self.countdown_label, text="Starting face recognition...")
         
         # Start countdown
         self.root.after(1000, update_countdown)
@@ -973,7 +967,7 @@ class SecurityGUI:
         if hasattr(self, 'auto_start_timer'):
             self.root.after_cancel(self.auto_start_timer)
         if hasattr(self, 'countdown_label'):
-            self.countdown_label.config(text="")
+            self.safe_widget_config(self.countdown_label, text="")
     
     def select_auth_method(self, method):
         """Handle authentication method selection."""
@@ -1199,7 +1193,7 @@ class SecurityGUI:
         cancel_btn.pack()
         
         # Start authentication process
-        self.root.after(1000, self.attempt_fingerprint_login)
+        self.safe_after_callback(1000, self.attempt_fingerprint_login)
     
     def attempt_password_login(self):
         """Attempt domain/password authentication."""
@@ -1394,7 +1388,7 @@ class SecurityGUI:
         cancel_btn.pack()
         
         # Check camera availability and start preview
-        self.root.after(100, self.init_deepface_camera_async)
+        self.safe_after_callback(0, self.init_deepface_camera_async)
     
     def init_deepface_camera_async(self):
         """Initialize DeepFace camera asynchronously to avoid blocking UI."""
@@ -1403,23 +1397,31 @@ class SecurityGUI:
                 if self.check_camera_available():
                     camera_ready = self.init_camera_preview(self.camera_preview_label)
                     if camera_ready:
-                        self.root.after(0, lambda: self.camera_status_label.config(
-                            text="Camera active - Position your face in view", fg=self.colors['success']))
+                        self.safe_after_callback(0, lambda: self.safe_widget_config(
+                            self.camera_status_label,
+                            text="Camera active - Position your face in view", 
+                            fg=self.colors['success']))
                         self.root.after(0, self.start_camera_preview)
                         # Start authentication process after camera is ready
                         self.root.after(500, self.attempt_deepface_login)
                     else:
-                        self.root.after(0, lambda: self.camera_status_label.config(
-                            text="Camera unavailable - Using fallback mode", fg=self.colors['danger']))
-                        self.root.after(0, lambda: self.camera_preview_label.config(
+                        self.safe_after_callback(0, lambda: self.safe_widget_config(
+                            self.camera_status_label,
+                            text="Camera unavailable - Using fallback mode", 
+                            fg=self.colors['danger']))
+                        self.safe_after_callback(0, lambda: self.safe_widget_config(
+                            self.camera_preview_label,
                             text="📹\nCamera Not Available\n\nUsing fallback authentication", 
                             font=("Segoe UI", 12, "normal")))
                         # Still attempt authentication without preview
                         self.root.after(500, self.attempt_deepface_login)
                 else:
-                    self.root.after(0, lambda: self.camera_status_label.config(
-                        text="Camera in use by detection system", fg=self.colors['danger']))
-                    self.root.after(0, lambda: self.camera_preview_label.config(
+                    self.safe_after_callback(0, lambda: self.safe_widget_config(
+                        self.camera_status_label,
+                        text="Camera in use by detection system", 
+                        fg=self.colors['danger']))
+                    self.safe_after_callback(0, lambda: self.safe_widget_config(
+                        self.camera_preview_label,
                         text="📹\nCamera In Use\n\nDetection system is active\nStop detection to use camera preview", 
                         font=("Segoe UI", 11, "normal")))
                     # Show information dialog about camera conflict
@@ -1432,8 +1434,10 @@ class SecurityGUI:
                     self.root.after(500, self.attempt_deepface_login)
             except Exception as e:
                 print(f"Camera initialization error: {e}")
-                self.root.after(0, lambda: self.camera_status_label.config(
-                    text="Camera initialization failed", fg=self.colors['danger']))
+                self.safe_after_callback(0, lambda: self.safe_widget_config(
+                    self.camera_status_label,
+                    text="Camera initialization failed", 
+                    fg=self.colors['danger']))
                 # Still attempt authentication without preview
                 self.root.after(500, self.attempt_deepface_login)
         
@@ -1451,28 +1455,34 @@ class SecurityGUI:
             return
             
         # Start with initializing models
-        self.deepface_status.config(text="Initializing AI models...", fg=self.colors['warning'])
+        self.safe_widget_config(self.deepface_status, text="Initializing AI models...", fg=self.colors['warning'])
         
         def auth_thread():
             try:
                 # Check if DeepFace is available first
                 if not self.deepface_auth.is_available():
-                    self.root.after(0, lambda: self.deepface_status.config(
-                        text="DeepFace library not available", fg=self.colors['danger']))
+                    self.safe_after_callback(0, lambda: self.safe_widget_config(
+                        self.deepface_status,
+                        text="DeepFace library not available", 
+                        fg=self.colors['danger']))
                     self.root.after(0, lambda: self.handle_auth_result(
                         False, None, "deepface", "DeepFace library not installed"))
                     return
                 
                 # Update status to scanning
-                self.root.after(0, lambda: self.deepface_status.config(
-                    text="AI models ready - Scanning faces...", fg=self.colors['primary']))
+                self.safe_after_callback(0, lambda: self.safe_widget_config(
+                    self.deepface_status,
+                    text="AI models ready - Scanning faces...", 
+                    fg=self.colors['primary']))
                 
                 # Use the GUI's camera if available, otherwise fall back to DeepFace's method
                 if self.camera_cap and self.camera_preview_active:
                     result = self.authenticate_face_with_gui_camera(timeout=30)
                 else:
-                    self.root.after(0, lambda: self.deepface_status.config(
-                        text="Using fallback camera mode...", fg=self.colors['warning']))
+                    self.safe_after_callback(0, lambda: self.safe_widget_config(
+                        self.deepface_status,
+                        text="Using fallback camera mode...", 
+                        fg=self.colors['warning']))
                     result = self.deepface_auth.authenticate_face(timeout=30)
                     
                 if result:
@@ -1490,13 +1500,17 @@ class SecurityGUI:
                         # Face authentication only (no stored password)
                         self.root.after(0, lambda: self.handle_auth_result(True, username, "deepface", role))
                 else:
-                    self.root.after(0, lambda: self.deepface_status.config(
-                        text="No matching face found", fg=self.colors['danger']))
+                    self.safe_after_callback(0, lambda: self.safe_widget_config(
+                        self.deepface_status,
+                        text="No matching face found", 
+                        fg=self.colors['danger']))
                     self.root.after(0, lambda: self.handle_auth_result(False, None, "deepface", "Face not recognized by AI"))
             except Exception as e:
                 error_msg = f"DeepFace authentication error: {str(e)}"
-                self.root.after(0, lambda: self.deepface_status.config(
-                    text="Authentication error occurred", fg=self.colors['danger']))
+                self.safe_after_callback(0, lambda: self.safe_widget_config(
+                    self.deepface_status,
+                    text="Authentication error occurred", 
+                    fg=self.colors['danger']))
                 self.root.after(0, lambda: self.handle_auth_result(False, None, "deepface", error_msg))
         
         threading.Thread(target=auth_thread, daemon=True).start()
@@ -1588,10 +1602,10 @@ class SecurityGUI:
         def authenticate_with_password():
             password = password_entry.get().strip()
             if not password:
-                status_label.config(text="Password cannot be empty", fg=self.colors['danger'])
+                self.safe_widget_config(status_label, text="Password cannot be empty", fg=self.colors['danger'])
                 return
             
-            status_label.config(text="Authenticating with domain...", fg=self.colors['primary'])
+            self.safe_widget_config(status_label, text="Authenticating with domain...", fg=self.colors['primary'])
             
             def ldap_auth_thread():
                 try:
@@ -1600,10 +1614,14 @@ class SecurityGUI:
                         role = result.get('role', 'user')
                         self.root.after(0, lambda: self.handle_auth_result(True, username, "face_and_ldap", role))
                     else:
-                        self.root.after(0, lambda: status_label.config(text="Invalid password or domain authentication failed", fg=self.colors['danger']))
+                        self.safe_after_callback(0, lambda: self.safe_widget_config(
+                            status_label, 
+                            text="Invalid password or domain authentication failed", 
+                            fg=self.colors['danger']))
                 except Exception as e:
                     error_msg = f"Authentication error: {str(e)}"
-                    self.root.after(0, lambda: status_label.config(text=error_msg, fg=self.colors['danger']))
+                    self.safe_after_callback(0, lambda: self.safe_widget_config(
+                        status_label, text=error_msg, fg=self.colors['danger']))
             
             threading.Thread(target=ldap_auth_thread, daemon=True).start()
         
@@ -1715,6 +1733,9 @@ class SecurityGUI:
         self.is_authenticated = True
         self.current_user = username
         self.current_role = role
+        
+        # Refresh watermark if it's active with new user information
+        self.refresh_watermark_if_active()
         
         SecurityUtils.log_security_event("GUI_AUTH_SUCCESS", f"GUI authentication successful for user: {username}")
         
@@ -2358,6 +2379,12 @@ class SecurityGUI:
                  command=self.delete_selected_user_unified,
                  bg=self.colors['danger'], fg='white', 
                  font=("Segoe UI", 9, "bold"), relief='flat', bd=0, 
+                 padx=12, pady=6).pack(side='left', padx=(0, 10))
+        
+        tk.Button(mgmt_buttons_frame, text="Check Duplicates", 
+                 command=self.check_system_face_duplicates,
+                 bg=self.colors['warning'], fg='white', 
+                 font=("Segoe UI", 9, "bold"), relief='flat', bd=0, 
                  padx=12, pady=6).pack(side='left')
     
     def setup_modern_user_mgmt_right_panel(self, parent):
@@ -2376,14 +2403,14 @@ class SecurityGUI:
                                      height=12, style='Modern.Treeview')
         
         # Configure columns with modern styling
-        self.user_tree.heading('System', text='System')
+        self.user_tree.heading('System', text='Sources')
         self.user_tree.heading('Username', text='Username')
         self.user_tree.heading('Name', text='Full Name')
         self.user_tree.heading('Role', text='Role')
         self.user_tree.heading('Email', text='Email')
         self.user_tree.heading('Created', text='Created')
         
-        self.user_tree.column('System', width=80)
+        self.user_tree.column('System', width=100)  # Increased for "LDAP + DeepFace"
         self.user_tree.column('Username', width=100)
         self.user_tree.column('Name', width=150)
         self.user_tree.column('Role', width=80)
@@ -2425,205 +2452,6 @@ class SecurityGUI:
         # Load initial data
         self.refresh_user_list_unified()
         self.log_user_mgmt_message("🚀 Modern User Management System initialized", "success")
-    
-    def setup_user_mgmt_left_panel(self, parent):
-        """Setup the left panel with user input and action buttons."""
-        
-        # User Information Section
-        info_frame = tk.LabelFrame(parent, text="User Information", 
-                                  font=("Helvetica", 12, "bold"), fg="gold", bg="darkblue")
-        info_frame.pack(fill='x', pady=5)
-        
-        # Username
-        tk.Label(info_frame, text="Username:", fg="white", bg="darkblue", font=("Helvetica", 10)).grid(row=0, column=0, sticky='w', padx=5, pady=3)
-        username_entry = tk.Entry(info_frame, textvariable=self.username_var, width=25, font=("Helvetica", 10))
-        username_entry.grid(row=0, column=1, padx=5, pady=3)
-        
-        # First Name
-        tk.Label(info_frame, text="First Name:", fg="white", bg="darkblue", font=("Helvetica", 10)).grid(row=1, column=0, sticky='w', padx=5, pady=3)
-        tk.Entry(info_frame, textvariable=self.first_name_var, width=25, font=("Helvetica", 10)).grid(row=1, column=1, padx=5, pady=3)
-        
-        # Last Name
-        tk.Label(info_frame, text="Last Name:", fg="white", bg="darkblue", font=("Helvetica", 10)).grid(row=2, column=0, sticky='w', padx=5, pady=3)
-        tk.Entry(info_frame, textvariable=self.last_name_var, width=25, font=("Helvetica", 10)).grid(row=2, column=1, padx=5, pady=3)
-        
-        # Email
-        tk.Label(info_frame, text="Email:", fg="white", bg="darkblue", font=("Helvetica", 10)).grid(row=3, column=0, sticky='w', padx=5, pady=3)
-        tk.Entry(info_frame, textvariable=self.email_var, width=25, font=("Helvetica", 10)).grid(row=3, column=1, padx=5, pady=3)
-        
-        # Role
-        tk.Label(info_frame, text="Role:", fg="white", bg="darkblue", font=("Helvetica", 10)).grid(row=4, column=0, sticky='w', padx=5, pady=3)
-        role_frame = tk.Frame(info_frame, bg="darkblue")
-        role_frame.grid(row=4, column=1, sticky='w', padx=5, pady=3)
-        
-        roles = [("User", "user"), ("Operator", "operator"), ("Admin", "admin")]
-        for i, (text, value) in enumerate(roles):
-            tk.Radiobutton(role_frame, text=text, variable=self.role_var, value=value,
-                          fg="white", bg="darkblue", selectcolor="navy", font=("Helvetica", 9)).pack(side='left', padx=5)
-        
-        # Add informational text about OU placement
-        ou_info_frame = tk.Frame(info_frame, bg="darkblue")
-        ou_info_frame.grid(row=4, column=2, sticky='w', padx=5, pady=3)
-        
-        # Clear button
-        tk.Button(info_frame, text="Clear Form", command=self.clear_user_form,
-                 bg='gray', fg='white', font=("Helvetica", 9)).grid(row=5, column=1, sticky='e', padx=5, pady=5)
-        
-        # Image Selection Section
-        image_frame = tk.LabelFrame(parent, text="Image Selection (Optional)", 
-                                   font=("Helvetica", 12, "bold"), fg="cyan", bg="darkblue")
-        image_frame.pack(fill='x', pady=5)
-        
-        self.image_label = tk.Label(image_frame, text="No image selected", 
-                                   fg="gray", bg="darkblue", font=("Helvetica", 9))
-        self.image_label.pack(pady=5)
-        
-        tk.Button(image_frame, text="Select Image File", command=self.select_image_file,
-                 bg='steelblue', fg='white', font=("Helvetica", 10)).pack(pady=5)
-        
-        # User Registration Actions
-        reg_frame = tk.LabelFrame(parent, text="User Registration Actions", 
-                                 font=("Helvetica", 12, "bold"), fg="lightgreen", bg="darkblue")
-        reg_frame.pack(fill='x', pady=5)
-        
-        tk.Button(reg_frame, text="Register User + Face (Camera)", 
-                 command=self.register_user_camera_unified,
-                 bg='darkgreen', fg='white', font=("Helvetica", 10), width=30).pack(pady=3)
-        
-        tk.Button(reg_frame, text="Register User + Face (Image)", 
-                 command=self.register_user_image_unified,
-                 bg='darkblue', fg='white', font=("Helvetica", 10), width=30).pack(pady=3)
-        
-        tk.Button(reg_frame, text="Register LDAP User Only", 
-                 command=self.create_ldap_user_only_unified,
-                 bg='purple', fg='white', font=("Helvetica", 10), width=30).pack(pady=3)
-        
-        # Authentication Testing
-        test_frame = tk.LabelFrame(parent, text="Authentication Testing", 
-                                  font=("Helvetica", 12, "bold"), fg="yellow", bg="darkblue")
-        test_frame.pack(fill='x', pady=5)
-        
-        test_buttons_frame = tk.Frame(test_frame, bg="darkblue")
-        test_buttons_frame.pack(pady=5)
-        
-        tk.Button(test_buttons_frame, text="Test DeepFace", 
-                 command=self.test_deepface_auth_unified,
-                 bg='darkviolet', fg='white', font=("Helvetica", 9), width=15).pack(side='left', padx=2)
-        
-        tk.Button(test_buttons_frame, text="Test Fingerprint", 
-                 command=self.test_fingerprint_auth_unified,
-                 bg='red', fg='white', font=("Helvetica", 9), width=15).pack(side='left', padx=2)
-        
-        # LDAP Authentication Testing (requires username/password)
-        ldap_test_frame = tk.Frame(test_frame, bg="darkblue")
-        ldap_test_frame.pack(pady=3)
-        
-        tk.Label(ldap_test_frame, text="Username:", fg="white", bg="darkblue", font=("Helvetica", 9)).pack(side='left')
-        tk.Entry(ldap_test_frame, textvariable=self.ldap_user_var, width=15, font=("Helvetica", 9)).pack(side='left', padx=3)
-        
-        tk.Label(ldap_test_frame, text="Password:", fg="white", bg="darkblue", font=("Helvetica", 9)).pack(side='left', padx=(10,0))
-        tk.Entry(ldap_test_frame, textvariable=self.ldap_pass_var, width=15, show='*', font=("Helvetica", 9)).pack(side='left', padx=3)
-        
-        tk.Button(ldap_test_frame, text="Login", 
-                 command=self.test_ldap_auth_unified,
-                 bg='orange', fg='white', font=("Helvetica", 9)).pack(side='left', padx=5)
-        
-        # User Management Actions
-        mgmt_frame = tk.LabelFrame(parent, text="User Management", 
-                                  font=("Helvetica", 12, "bold"), fg="lightblue", bg="darkblue")
-        mgmt_frame.pack(fill='x', pady=5)
-        
-        mgmt_buttons_frame = tk.Frame(mgmt_frame, bg="darkblue")
-        mgmt_buttons_frame.pack(pady=5)
-        
-        tk.Button(mgmt_buttons_frame, text="Refresh User List", 
-                 command=self.refresh_user_list_unified,
-                 bg='darkgreen', fg='white', font=("Helvetica", 9), width=15).pack(side='left', padx=2)
-        
-        tk.Button(mgmt_buttons_frame, text="Delete Selected User", 
-                 command=self.delete_selected_user_unified,
-                 bg='darkred', fg='white', font=("Helvetica", 9), width=20).pack(side='left', padx=2)
-        
-        # System Information
-        sys_frame = tk.LabelFrame(parent, text="System Information", 
-                                 font=("Helvetica", 12, "bold"), fg="orange", bg="darkblue")
-        sys_frame.pack(fill='x', pady=5)
-        
-        sys_buttons_frame = tk.Frame(sys_frame, bg="darkblue")
-        sys_buttons_frame.pack(pady=5)
-        
-        tk.Button(sys_buttons_frame, text="System Status", 
-                 command=self.show_system_status_unified,
-                 bg='brown', fg='white', font=("Helvetica", 9), width=15).pack(side='left', padx=2)
-        
-        tk.Button(sys_buttons_frame, text="View Security Logs", 
-                 command=self.view_security_logs_unified,
-                 bg='navy', fg='white', font=("Helvetica", 9), width=15).pack(side='left', padx=2)
-    
-    def setup_user_mgmt_right_panel(self, parent):
-        """Setup the right panel with output and user list."""
-        
-        # User List Section
-        users_frame = tk.LabelFrame(parent, text="Registered Users", 
-                                   font=("Helvetica", 12, "bold"), fg="lightgreen", bg="darkblue")
-        users_frame.pack(fill='both', expand=True, pady=(0,5))
-        
-        # User list with scrollbar
-        list_frame = tk.Frame(users_frame, bg="darkblue")
-        list_frame.pack(fill='both', expand=True, padx=5, pady=5)
-        
-        # Create Treeview for user list
-        columns = ('System', 'Username', 'Name', 'Role', 'Email', 'Created')
-        self.user_tree = ttk.Treeview(list_frame, columns=columns, show='headings', height=10)
-        
-        # Configure columns
-        self.user_tree.heading('System', text='System')
-        self.user_tree.heading('Username', text='Username')
-        self.user_tree.heading('Name', text='Full Name')
-        self.user_tree.heading('Role', text='Role')
-        self.user_tree.heading('Email', text='Email')
-        self.user_tree.heading('Created', text='Created')
-        
-        self.user_tree.column('System', width=80)
-        self.user_tree.column('Username', width=100)
-        self.user_tree.column('Name', width=150)
-        self.user_tree.column('Role', width=80)
-        self.user_tree.column('Email', width=150)
-        self.user_tree.column('Created', width=120)
-        
-        # Scrollbars for user list
-        v_scrollbar = ttk.Scrollbar(list_frame, orient='vertical', command=self.user_tree.yview)
-        h_scrollbar = ttk.Scrollbar(list_frame, orient='horizontal', command=self.user_tree.xview)
-        self.user_tree.configure(yscrollcommand=v_scrollbar.set, xscrollcommand=h_scrollbar.set)
-        
-        # Use grid for better scrollbar placement
-        self.user_tree.grid(row=0, column=0, sticky='nsew')
-        v_scrollbar.grid(row=0, column=1, sticky='ns')
-        h_scrollbar.grid(row=1, column=0, sticky='ew')
-        
-        # Configure grid weights
-        list_frame.grid_rowconfigure(0, weight=1)
-        list_frame.grid_columnconfigure(0, weight=1)
-        
-        # Output Section
-        output_frame = tk.LabelFrame(parent, text="System Output", 
-                                    font=("Helvetica", 12, "bold"), fg="white", bg="darkblue")
-        output_frame.pack(fill='both', expand=True, pady=(5,0))
-        
-        # Output text with scrollbar
-        output_container = tk.Frame(output_frame, bg="darkblue")
-        output_container.pack(fill='both', expand=True, padx=5, pady=5)
-        
-        self.user_mgmt_output = tk.Text(output_container, height=12, font=("Courier", 9), bg='black', fg='white')
-        output_scrollbar = ttk.Scrollbar(output_container, command=self.user_mgmt_output.yview)
-        self.user_mgmt_output.configure(yscrollcommand=output_scrollbar.set)
-        
-        self.user_mgmt_output.pack(side='left', fill='both', expand=True)
-        output_scrollbar.pack(side='right', fill='y')
-        
-        # Load initial data
-        self.refresh_user_list_unified()
-        self.log_user_mgmt_message("User Management System initialized")
     
     # User Management Helper Methods
     def update_password_strength(self):
@@ -2800,8 +2628,50 @@ class SecurityGUI:
             self.password_strength_label.config(text="", fg=self.colors['on_surface'])
         self.log_user_mgmt_message("Form cleared")
     
+    def check_face_duplicate_warning(self, image_path: str = None) -> bool:
+        """
+        Check for face duplicates and show a warning dialog if found.
+        
+        Args:
+            image_path: Path to image file, or None to capture from camera
+            
+        Returns:
+            True if user wants to proceed despite duplicate, False to cancel
+        """
+        try:
+            is_duplicate, message, duplicate_info = self.deepface_auth.check_face_duplicate_from_image(image_path)
+            
+            if is_duplicate and duplicate_info:
+                duplicate_user = duplicate_info['duplicate_username']
+                duplicate_name = f"{duplicate_info['duplicate_first_name']} {duplicate_info['duplicate_last_name']}".strip()
+                similarity = duplicate_info['similarity_percentage']
+                
+                warning_title = "⚠️ Face Duplicate Detected"
+                warning_message = f"This face appears to match an existing user:\n\n"
+                warning_message += f"👤 Username: {duplicate_user}\n"
+                if duplicate_name:
+                    warning_message += f"📝 Name: {duplicate_name}\n"
+                warning_message += f"🎯 Similarity: {similarity:.1f}%\n\n"
+                warning_message += "Registration will be blocked to prevent face duplication.\n"
+                warning_message += "Each face can only be registered to one user for security."
+                
+                self.show_custom_dialog(warning_title, warning_message, "error")
+                self.log_user_mgmt_message(f"DUPLICATE DETECTED: {message}", "error")
+                return False
+            elif not is_duplicate:
+                self.log_user_mgmt_message("Face duplicate check passed - no duplicates found", "success")
+                return True
+            else:
+                # Error in duplicate checking, but allow to proceed
+                self.log_user_mgmt_message(f"Warning: Could not check for duplicates - {message}", "warning")
+                return True
+                
+        except Exception as e:
+            self.log_user_mgmt_message(f"Error checking for face duplicates: {str(e)}", "error")
+            return True  # Allow to proceed if check fails
+    
     def select_image_file(self):
-        """Select an image file for face registration."""
+        """Select an image file for face registration with duplicate checking."""
         file_path = filedialog.askopenfilename(
             title="Select Face Image",
             filetypes=[
@@ -2810,12 +2680,63 @@ class SecurityGUI:
             ]
         )
         if file_path:
-            self.selected_image_path = file_path
-            filename = os.path.basename(file_path)
-            if hasattr(self, 'image_label'):
-                self.image_label.config(text=f"Selected: {filename}", fg='lightgreen')
-            self.log_user_mgmt_message(f"Image selected: {filename}")
+            # Check for duplicates before accepting the image
+            self.log_user_mgmt_message(f"Checking selected image for face duplicates...")
+            
+            if self.check_face_duplicate_warning(file_path):
+                # No duplicates found or user chose to proceed
+                self.selected_image_path = file_path
+                filename = os.path.basename(file_path)
+                if hasattr(self, 'image_label'):
+                    self.image_label.config(text=f"✅ Selected: {filename}", fg='lightgreen')
+                self.log_user_mgmt_message(f"Image selected: {filename}", "success")
+            else:
+                # Duplicates found - don't set the image path
+                self.selected_image_path = ""
+                if hasattr(self, 'image_label'):
+                    self.image_label.config(text="❌ Image rejected (duplicate face)", fg='red')
+                self.log_user_mgmt_message("Image selection cancelled due to face duplicate", "error")
     
+    # System Maintenance Methods
+    def check_system_face_duplicates(self):
+        """Check for face duplicates across the entire system."""
+        self.log_user_mgmt_message("Scanning system for face duplicates...", "info")
+        
+        try:
+            duplicates = self.deepface_auth.find_all_face_duplicates()
+            
+            if not duplicates:
+                self.log_user_mgmt_message("✅ No face duplicates found in the system", "success")
+                self.show_custom_dialog("System Check Complete", 
+                                       "No face duplicates were found in the system.\nAll registered faces are unique.", 
+                                       "success")
+            else:
+                self.log_user_mgmt_message(f"⚠️ Found {len(duplicates)} potential face duplicate(s):", "warning")
+                
+                duplicate_details = f"Found {len(duplicates)} potential face duplicate(s):\n\n"
+                for i, dup in enumerate(duplicates, 1):
+                    user1 = dup['user1']
+                    user2 = dup['user2']
+                    similarity = dup['similarity_percentage']
+                    
+                    duplicate_details += f"{i}. {user1['username']}"
+                    if user1['name']:
+                        duplicate_details += f" ({user1['name']})"
+                    duplicate_details += f" ↔ {user2['username']}"
+                    if user2['name']:
+                        duplicate_details += f" ({user2['name']})"
+                    duplicate_details += f"\n   Similarity: {similarity:.1f}%\n\n"
+                    
+                    # Log each duplicate
+                    self.log_user_mgmt_message(f"   • {user1['username']} ↔ {user2['username']} ({similarity:.1f}% similar)", "warning")
+                
+                self.show_custom_dialog("⚠️ Face Duplicates Detected", duplicate_details, "warning")
+                
+        except Exception as e:
+            error_msg = f"Error checking for system duplicates: {str(e)}"
+            self.log_user_mgmt_message(error_msg, "error")
+            self.show_custom_dialog("Error", error_msg, "error")
+
     def log_user_mgmt_message(self, message, level="info"):
         """Log message to the user management output with timestamp and color coding."""
         if not hasattr(self, 'user_mgmt_output'):
@@ -3145,9 +3066,9 @@ class SecurityGUI:
             # Get LDAP users
             ldap_users = []
             try:
-                # LDAP doesn't have a list_users method, skip for now
-                # ldap_users = self.ldap_auth.list_users()
-                ldap_users = []
+                ldap_users = self.ldap_auth.list_users()
+                if not ldap_users:
+                    ldap_users = []
             except Exception as e:
                 self.log_user_mgmt_message(f"Warning: Could not retrieve LDAP users: {str(e)}", "warning")
             
@@ -3160,37 +3081,85 @@ class SecurityGUI:
             except Exception as e:
                 self.log_user_mgmt_message(f"Warning: Could not retrieve DeepFace users: {str(e)}", "warning")
             
-            # Combine and display users
-            all_usernames = set()
+            # Create a unified user list with deduplication
+            unified_users = {}  # Use username as key to avoid duplicates
             
-            # Add LDAP users
+            # Process LDAP users first (they take priority)
             for user in ldap_users:
                 username = user.get('username', 'Unknown')
-                all_usernames.add(username)
-                
-                self.user_tree.insert('', 'end', values=(
-                    'LDAP',
-                    username,
-                    f"{user.get('first_name', '')} {user.get('last_name', '')}".strip(),
-                    user.get('role', 'Unknown'),
-                    user.get('email', ''),
-                    user.get('created_date', '')
-                ))
+                unified_users[username] = {
+                    'username': username,
+                    'first_name': user.get('first_name', ''),
+                    'last_name': user.get('last_name', ''),
+                    'display_name': user.get('display_name', ''),
+                    'email': user.get('email', ''),
+                    'role': user.get('role', 'user'),
+                    'created_date': user.get('created_date', ''),
+                    'sources': ['LDAP']  # Track which systems the user exists in
+                }
             
-            # Add DeepFace users (only if not already in LDAP)
+            # Process DeepFace users and merge with LDAP users
             for user in deepface_users:
                 username = user.get('username', 'Unknown')
-                if username not in all_usernames:
-                    self.user_tree.insert('', 'end', values=(
-                        'DeepFace',
-                        username,
-                        f"{user.get('first_name', '')} {user.get('last_name', '')}".strip(),
-                        user.get('role', 'Unknown'),
-                        user.get('email', ''),
-                        user.get('registration_date', '')
-                    ))
+                if username in unified_users:
+                    # User exists in both systems - merge the information
+                    unified_users[username]['sources'].append('DeepFace')
+                    # Prefer LDAP data but fill in missing fields from DeepFace
+                    if not unified_users[username]['first_name'] and user.get('first_name'):
+                        unified_users[username]['first_name'] = user.get('first_name', '')
+                    if not unified_users[username]['last_name'] and user.get('last_name'):
+                        unified_users[username]['last_name'] = user.get('last_name', '')
+                    if not unified_users[username]['email'] and user.get('email'):
+                        unified_users[username]['email'] = user.get('email', '')
+                    if not unified_users[username]['display_name'] and user.get('display_name'):
+                        unified_users[username]['display_name'] = user.get('display_name', '')
+                else:
+                    # User only exists in DeepFace
+                    unified_users[username] = {
+                        'username': username,
+                        'first_name': user.get('first_name', ''),
+                        'last_name': user.get('last_name', ''),
+                        'display_name': user.get('display_name', ''),
+                        'email': user.get('email', ''),
+                        'role': user.get('role', 'user'),
+                        'created_date': user.get('created_date', ''),
+                        'sources': ['DeepFace']
+                    }
             
-            self.log_user_mgmt_message(f"User list refreshed - LDAP: {len(ldap_users)}, DeepFace: {len(deepface_users)}")
+            # Add users to the tree view
+            for user_data in unified_users.values():
+                # Build display name
+                display_name = user_data['display_name']
+                if not display_name:
+                    display_name = f"{user_data['first_name']} {user_data['last_name']}".strip()
+                if not display_name:
+                    display_name = user_data['username']
+                
+                # Format sources for display
+                sources_str = ' + '.join(user_data['sources'])
+                
+                # Add visual indicator for users in both systems
+                if len(user_data['sources']) > 1:
+                    sources_str = f"🔗 {sources_str}"  # Link icon for unified users
+                
+                self.user_tree.insert('', 'end', values=(
+                    sources_str,
+                    user_data['username'],
+                    display_name,
+                    user_data['role'],
+                    user_data['email'],
+                    user_data['created_date']
+                ))
+            
+            # Update log with summary
+            total_users = len(unified_users)
+            ldap_count = len(ldap_users)
+            deepface_count = len(deepface_users)
+            unified_count = sum(1 for user in unified_users.values() if len(user['sources']) > 1)
+            
+            self.log_user_mgmt_message(
+                f"User list refreshed - Total: {total_users} users (LDAP: {ldap_count}, DeepFace: {deepface_count}, Unified: {unified_count})"
+            )
             
         except Exception as e:
             self.log_user_mgmt_message(f"Error refreshing user list: {str(e)}", "error")
@@ -3237,91 +3206,6 @@ class SecurityGUI:
             self.log_user_mgmt_message(f"Error deleting user {username}: {str(e)}", "error")
     
     # System Information Methods
-    def show_system_status_unified(self):
-        """Show system status information."""
-        self.log_user_mgmt_message("=== SYSTEM STATUS ===")
-        
-        try:
-            # LDAP Status
-            try:
-                # LDAP doesn't have a list_users method, just check availability
-                if self.ldap_auth.is_available():
-                    self.log_user_mgmt_message("LDAP Server: Connected (users count not available)")
-                else:
-                    self.log_user_mgmt_message("LDAP Server: Not available", "warning")
-            except Exception as e:
-                self.log_user_mgmt_message(f"LDAP Server: Error - {str(e)}", "error")
-            
-            # DeepFace Status
-            try:
-                deepface_users = self.deepface_auth.list_registered_faces()
-                self.log_user_mgmt_message(f"DeepFace System: Active ({len(deepface_users)} users)")
-            except Exception as e:
-                self.log_user_mgmt_message(f"DeepFace System: Error - {str(e)}", "error")
-            
-            # Biometric Status
-            try:
-                self.log_user_mgmt_message("Biometric System: Available")
-            except Exception as e:
-                self.log_user_mgmt_message(f"Biometric System: Error - {str(e)}", "error")
-            
-            # Database Status
-            try:
-                db_path = "face_data/deepface_auth.db"
-                if os.path.exists(db_path):
-                    size = os.path.getsize(db_path)
-                    self.log_user_mgmt_message(f"Database: Connected ({size} bytes)")
-                else:
-                    self.log_user_mgmt_message("Database: Not found", "warning")
-            except Exception as e:
-                self.log_user_mgmt_message(f"Database: Error - {str(e)}", "error")
-                
-        except Exception as e:
-            self.log_user_mgmt_message(f"Error checking system status: {str(e)}", "error")
-    
-    def view_security_logs_unified(self):
-        """View recent security logs."""
-        self.log_user_mgmt_message("=== RECENT SECURITY LOGS ===")
-        
-        try:
-            logs_dir = "logs"
-            if not os.path.exists(logs_dir):
-                self.log_user_mgmt_message("Logs directory not found", "warning")
-                return
-            
-            # Get the most recent log file
-            log_files = [f for f in os.listdir(logs_dir) if f.startswith("security_log_")]
-            if not log_files:
-                self.log_user_mgmt_message("No security log files found", "warning")
-                return
-            
-            # Sort by date and get the most recent
-            log_files.sort(reverse=True)
-            recent_log = os.path.join(logs_dir, log_files[0])
-            
-            self.log_user_mgmt_message(f"Showing recent entries from: {log_files[0]}")
-            
-            # Read and display last 10 lines
-            with open(recent_log, 'r') as f:
-                lines = f.readlines()
-                recent_lines = lines[-10:] if len(lines) > 10 else lines
-                
-                for line in recent_lines:
-                    self.log_user_mgmt_message(line.strip())
-            
-        except Exception as e:
-            self.log_user_mgmt_message(f"Error reading security logs: {str(e)}", "error")
-        
-        # Show camera/detection status
-        if self.detection_running:
-            self.log_user_mgmt_output("⚠️  WARNING: Detection system is currently running")
-            self.log_user_mgmt_output("📹 Camera is being used by detection system")
-            self.log_user_mgmt_output("💡 Face registration from camera may fail")
-            self.log_user_mgmt_output("🔧 Consider using 'Register Face (Image)' instead")
-        else:
-            self.log_user_mgmt_output("✅ Camera available for face registration")
-            self.log_user_mgmt_output("📹 Detection system inactive - GUI mode active")
-    
     def show_security_logs(self):
         """Show the modern security logs interface within the GUI."""
         self.clear_screen()
@@ -3450,176 +3334,6 @@ class SecurityGUI:
         # Load initial logs
         self.refresh_security_logs()
     
-    def view_security_logs(self):
-        """Deprecated - replaced by show_security_logs."""
-        self.show_security_logs()
-    
-    def log_user_mgmt_output(self, message: str):
-        """Log message to user management output area."""
-        self.log_user_mgmt_message(message, "info")
-    
-    def show_file_selection_dialog(self, title, filetypes, callback):
-        """Show file selection dialog within GUI."""
-        # For now, we'll use a simple text input for the file path
-        # In a full implementation, you could create a file browser within the GUI
-        def on_path_input(file_path):
-            if file_path and callback:
-                callback(file_path)
-        
-        self.show_custom_dialog("File Path", f"{title}\nEnter full path to image file:", "info", input_field=True, callback=on_path_input)
-    
-    def _process_image_registration(self, username, password, image_path):
-        """Process image registration with given username, password and path."""
-        if not image_path:
-            return
-        
-        self.log_user_mgmt_output(f"Registering face from image for user: {username}")
-        self.log_user_mgmt_output(f"Image path: {image_path}")
-        
-        def registration_thread():
-            try:
-                success = self.deepface_auth.register_face(username, image_path, password=password)
-                if success:
-                    self.root.after(0, lambda: self.log_user_mgmt_output(f"✅ Face registered successfully for {username}"))
-                    self.root.after(0, lambda: self.show_custom_dialog("Success", f"Face registered successfully for {username}", "info"))
-                else:
-                    self.root.after(0, lambda: self.log_user_mgmt_output(f"❌ Face registration failed for {username}"))
-                    self.root.after(0, lambda: self.show_custom_dialog("Error", f"Face registration failed for {username}", "error"))
-            except Exception as e:
-                self.root.after(0, lambda: self.log_user_mgmt_output(f"❌ Error during face registration: {e}"))
-                self.root.after(0, lambda: self.show_custom_dialog("Error", f"Face registration error: {e}", "error"))
-        
-        threading.Thread(target=registration_thread, daemon=True).start()
-    
-    def list_registered_users(self):
-        """List all registered users."""
-        self.log_user_mgmt_output("Retrieving list of registered users...")
-        
-        def list_thread():
-            try:
-                users = self.deepface_auth.list_registered_faces()
-                if users:
-                    self.root.after(0, lambda: self.log_user_mgmt_output(f"✅ Found {len(users)} registered users:"))
-                    for user in users:
-                        if isinstance(user, dict):
-                            user_info = f"  - {user.get('first_name', '')} {user.get('last_name', '')} ({user.get('username', 'N/A')})"
-                            if user.get('email'):
-                                user_info += f" - {user['email']}"
-                            if user.get('role'):
-                                user_info += f" [{user['role']}]"
-                            # Fix closure issue by capturing user_info in a new scope
-                            self.root.after(0, self._log_user_info, user_info)
-                        else:
-                            user_info = f"  - {user}"
-                            self.root.after(0, self._log_user_info, user_info)
-                else:
-                    self.root.after(0, lambda: self.log_user_mgmt_output("No registered users found."))
-            except Exception as e:
-                self.root.after(0, lambda: self.log_user_mgmt_output(f"❌ Error retrieving users: {e}"))
-        
-        threading.Thread(target=list_thread, daemon=True).start()
-    
-    def _log_user_info(self, user_info):
-        """Helper method to log user info (fixes closure issues)."""
-        self.log_user_mgmt_output(user_info)
-    
-    def delete_user_face(self):
-        """Delete a user's face registration."""
-        def on_username_input(username):
-            if not username:
-                return
-            
-            def on_confirmation(confirmed):
-                if not confirmed:
-                    return
-                
-                self.log_user_mgmt_output(f"Deleting user registration for: {username}")
-                
-                def delete_thread():
-                    try:
-                        success = self.deepface_auth.delete_face(username)
-                        if success:
-                            self.root.after(0, lambda: self.log_user_mgmt_output(f"✅ User {username} deleted successfully"))
-                            self.root.after(0, lambda: self.show_custom_dialog("Success", f"User {username} deleted successfully", "info"))
-                        else:
-                            self.root.after(0, lambda: self.log_user_mgmt_output(f"❌ Failed to delete user {username}"))
-                            self.root.after(0, lambda: self.show_custom_dialog("Error", f"Failed to delete user {username}", "error"))
-                    except Exception as e:
-                        self.root.after(0, lambda: self.log_user_mgmt_output(f"❌ Error deleting user: {e}"))
-                        self.root.after(0, lambda: self.show_custom_dialog("Error", f"Error deleting user: {e}", "error"))
-                
-                threading.Thread(target=delete_thread, daemon=True).start()
-            
-            self.show_custom_dialog("Confirm Deletion", f"Are you sure you want to delete user '{username}'?", "yesno", callback=on_confirmation)
-        
-        self.show_custom_dialog("Delete User", "Enter username to delete:", "info", input_field=True, callback=on_username_input)
-    
-    def test_deepface_auth(self):
-        """Test DeepFace recognition authentication."""
-        self.log_user_mgmt_output("Starting DeepFace recognition test...")
-        
-        def test_thread():
-            try:
-                result = self.deepface_auth.authenticate_face(timeout=30)
-                if result:
-                    user_info = f"{result.get('first_name', '')} {result.get('last_name', '')} ({result.get('username', 'N/A')})"
-                    self.root.after(0, lambda: self.log_user_mgmt_output(f"✅ DeepFace authentication successful for user: {user_info}"))
-                    self.root.after(0, lambda: self.log_user_mgmt_output(f"   - Role: {result.get('role', 'N/A')}"))
-                    self.root.after(0, lambda: self.log_user_mgmt_output(f"   - Email: {result.get('email', 'N/A')}"))
-                    if 'euclidean_distance' in result:
-                        self.root.after(0, lambda: self.log_user_mgmt_output(f"   - Euclidean Distance: {result['euclidean_distance']:.4f}"))
-                    if 'cosine_similarity' in result:
-                        self.root.after(0, lambda: self.log_user_mgmt_output(f"   - Cosine Similarity: {result['cosine_similarity']:.4f}"))
-                    success_msg = f"DeepFace authentication successful!\nUser: {user_info}\nRole: {result.get('role', 'N/A')}"
-                    self.root.after(0, lambda: self.show_custom_dialog("Success", success_msg, "info"))
-                else:
-                    self.root.after(0, lambda: self.log_user_mgmt_output("❌ DeepFace authentication failed or timed out"))
-                    self.root.after(0, lambda: self.show_custom_dialog("Failed", "DeepFace authentication failed or timed out", "error"))
-            except Exception as e:
-                self.root.after(0, lambda: self.log_user_mgmt_output(f"❌ DeepFace authentication error: {e}"))
-                self.root.after(0, lambda: self.show_custom_dialog("Error", f"DeepFace authentication error: {e}", "error"))
-        
-        threading.Thread(target=test_thread, daemon=True).start()
-    
-    def test_ldap_auth(self):
-        """Test LDAP authentication."""
-        def on_username_input(username):
-            if not username:
-                return
-            
-            def on_password_input(password):
-                if not password:
-                    return
-                
-                self.log_user_mgmt_output(f"Testing LDAP authentication for user: {username}")
-                
-                def test_thread():
-                    try:
-                        ldap_auth = LDAPAuthenticator(Config())
-                        success, result = ldap_auth.authenticate({
-                            'username': username,
-                            'password': password
-                        })
-                        
-                        if success:
-                            self.root.after(0, lambda: self.log_user_mgmt_output(f"✅ LDAP authentication successful for {username}"))
-                            self.root.after(0, lambda: self.log_user_mgmt_output(f"User info: {result}"))
-                            role = result.get('role', 'Unknown') if isinstance(result, dict) else 'User'
-                            success_msg = f"LDAP authentication successful!\nUser: {username}\nRole: {role}"
-                            self.root.after(0, lambda: self.show_custom_dialog("Success", success_msg, "info"))
-                        else:
-                            self.root.after(0, lambda: self.log_user_mgmt_output(f"❌ LDAP authentication failed: {result}"))
-                            self.root.after(0, lambda: self.show_custom_dialog("Error", f"LDAP authentication failed: {result}", "error"))
-                    except Exception as e:
-                        self.root.after(0, lambda: self.log_user_mgmt_output(f"❌ LDAP authentication error: {e}"))
-                        self.root.after(0, lambda: self.show_custom_dialog("Error", f"LDAP authentication error: {e}", "error"))
-                
-                threading.Thread(target=test_thread, daemon=True).start()
-            
-            self.show_custom_dialog("LDAP Test", "Enter password:", "info", input_field=True, password=True, callback=on_password_input)
-        
-        self.show_custom_dialog("LDAP Test", "Enter username:", "info", input_field=True, callback=on_username_input)
-    
     def refresh_security_logs(self):
         """Refresh and display security logs."""
         self.logs_output.delete(1.0, tk.END)
@@ -3728,8 +3442,404 @@ class SecurityGUI:
         self.logs_output.delete(1.0, tk.END)
         self.logs_output.insert(tk.END, message + "\n")
     
+    def create_watermark_overlay(self):
+        """Create a transparent watermark overlay with LDAP user information - like example.py."""
+        if self.watermark_window is not None:
+            return  # Already exists
+            
+        try:
+            # Create watermark window exactly like example.py
+            self.watermark_window = tk.Toplevel(self.root)
+            self.watermark_window.title("")
+            self.watermark_window.overrideredirect(True)  # Remove window decorations
+            
+            # Get screen dimensions
+            screen_width = self.watermark_window.winfo_screenwidth()
+            screen_height = self.watermark_window.winfo_screenheight()
+            
+            # Set window to cover entire screen
+            self.watermark_window.geometry(f"{screen_width}x{screen_height}+0+0")
+            
+            # Configure transparency exactly like example.py
+            self.watermark_window.configure(bg='white')  # Use white background for transparency
+            self.watermark_window.wm_attributes("-transparentcolor", "white")  # Make white transparent
+            self.watermark_window.wm_attributes("-alpha", 0.4)  # Set opacity like example
+            self.watermark_window.wm_attributes("-topmost", True)  # Always on top
+            
+            # Lift window to front
+            self.watermark_window.lift()
+            
+            # Prevent window from being closed
+            self.watermark_window.protocol("WM_DELETE_WINDOW", lambda: None)
+            
+            # Create watermark content
+            self.create_watermark_content()
+            
+            self.watermark_active = True
+            SecurityUtils.log_security_event("WATERMARK_CREATED", f"Security watermark overlay created for user: {self.current_user}")
+            print("✓ Watermark overlay created with transparent background (like example.py)")
+            
+        except Exception as e:
+            print(f"Error creating watermark overlay: {e}")
+            SecurityUtils.log_security_event("WATERMARK_ERROR", f"Error creating watermark: {e}")
+            # Clean up on error
+            if hasattr(self, 'watermark_window') and self.watermark_window:
+                try:
+                    self.watermark_window.destroy()
+                except:
+                    pass
+                self.watermark_window = None
+                self.watermark_active = False
+    
+    def setup_watermark_event_passthrough(self):
+        """Setup fallback event passthrough for watermark window when win32gui is not available."""
+        if not self.watermark_window:
+            return
+            
+        # Configure window to not accept focus and ignore events
+        try:
+            # Make window not focusable
+            self.watermark_window.attributes('-type', 'desktop')
+        except tk.TclError:
+            # Not supported on all platforms, try alternative
+            pass
+        
+        # Bind all interactive events to be ignored/passed through
+        def ignore_event(event):
+            return "break"
+        
+        # Bind mouse events to ignore them
+        events_to_ignore = [
+            '<Button-1>', '<Button-2>', '<Button-3>',
+            '<ButtonRelease-1>', '<ButtonRelease-2>', '<ButtonRelease-3>',
+            '<Double-Button-1>', '<Double-Button-2>', '<Double-Button-3>',
+            '<Motion>', '<Enter>', '<Leave>',
+            '<Key>', '<KeyPress>', '<KeyRelease>',
+            '<FocusIn>', '<FocusOut>',
+            '<MouseWheel>', '<Button-4>', '<Button-5>'
+        ]
+        
+        for event in events_to_ignore:
+            self.watermark_window.bind(event, ignore_event)
+        
+        # Also bind events to all child widgets
+        def bind_children(widget):
+            for child in widget.winfo_children():
+                for event in events_to_ignore:
+                    child.bind(event, ignore_event)
+                bind_children(child)
+        
+        bind_children(self.watermark_window)
+        
+        # Lower the window below other windows periodically to reduce interference
+        def lower_window():
+            if self.watermark_active and self.watermark_window:
+                try:
+                    # Lower the window but keep it topmost
+                    self.watermark_window.lower()
+                    self.watermark_window.attributes("-topmost", True)
+                    # Schedule next lowering
+                    self.root.after(1000, lower_window)
+                except:
+                    pass
+        
+        # Start the lowering process
+        self.root.after(100, lower_window)
+        
+        print("✓ Watermark configured with enhanced event passthrough fallback")
+
+    def create_watermark_content(self):
+        """Create the content for the watermark overlay - all labels organized in the center."""
+        if not self.watermark_window:
+            return
+            
+        # Get current system and user information
+        sys_info = SecurityUtils.get_system_info()
+        
+        # Get LDAP user details if available
+        user_details = self.get_current_user_details()
+        
+        # Create main center container for all watermark content
+        main_container = tk.Frame(self.watermark_window, bg='#000000', highlightthickness=2, highlightbackground='white')
+        main_container.place(relx=0.5, rely=0.5, anchor='center')
+        
+        # Title section - System Logo and Main Title
+        title_section = tk.Frame(main_container, bg='#000000')
+        title_section.pack(pady=(15, 10))
+        
+        # Large security icon
+        center_logo = tk.Label(
+            title_section,
+            text="🔒",
+            fg='lightgray',
+            bg='#000000',
+            font=("Segoe UI", 80, "bold")
+        )
+        center_logo.pack()
+        
+        # Main title
+        main_title = tk.Label(
+            title_section,
+            text="PHYSICAL SECURITY SYSTEM",
+            fg='white',
+            bg='#000000',
+            font=("Segoe UI", 20, "bold"),
+            justify='center'
+        )
+        main_title.pack()
+        
+        # Subtitle
+        subtitle = tk.Label(
+            title_section,
+            text="MONITORING ACTIVE",
+            fg='yellow',
+            bg='#000000',
+            font=("Segoe UI", 14, "bold"),
+            justify='center'
+        )
+        subtitle.pack(pady=(5, 0))
+        
+        # User Information Section
+        user_section = tk.Frame(main_container, bg='#000000')
+        user_section.pack(pady=10, padx=20, fill='x')
+        
+        user_title = tk.Label(
+            user_section,
+            text="👤 AUTHENTICATED USER",
+            fg='cyan',
+            bg='#000000',
+            font=("Segoe UI", 12, "bold"),
+            justify='center'
+        )
+        user_title.pack()
+        
+        user_info_text = f"User: {user_details['display_name']}\nRole: {user_details['role'].upper()}\nDomain: {user_details['domain']}"
+        if user_details['email']:
+            user_info_text += f"\nEmail: {user_details['email']}"
+            
+        user_info = tk.Label(
+            user_section,
+            text=user_info_text,
+            fg='white',
+            bg='#000000',
+            font=("Segoe UI", 10, "normal"),
+            justify='center'
+        )
+        user_info.pack(pady=(5, 0))
+        
+        # System Status Section
+        status_section = tk.Frame(main_container, bg='#000000')
+        status_section.pack(pady=10, padx=20, fill='x')
+        
+        status_title = tk.Label(
+            status_section,
+            text="� SYSTEM STATUS",
+            fg='lightgreen',
+            bg='#000000',
+            font=("Segoe UI", 12, "bold"),
+            justify='center'
+        )
+        status_title.pack()
+        
+        status_info = tk.Label(
+            status_section,
+            text=f"Detection: RUNNING\nTimestamp: {sys_info['timestamp']}",
+            fg='white',
+            bg='#000000',
+            font=("Segoe UI", 10, "normal"),
+            justify='center'
+        )
+        status_info.pack(pady=(5, 0))
+        
+        # System Information Section
+        system_section = tk.Frame(main_container, bg='#000000')
+        system_section.pack(pady=10, padx=20, fill='x')
+        
+        system_title = tk.Label(
+            system_section,
+            text="💻 SYSTEM INFORMATION",
+            fg='orange',
+            bg='#000000',
+            font=("Segoe UI", 12, "bold"),
+            justify='center'
+        )
+        system_title.pack()
+        
+        system_info = tk.Label(
+            system_section,
+            text=f"Computer: {sys_info['computer_name']}\nIP Address: {sys_info['ip_address']}\nOS User: {sys_info['username']}",
+            fg='white',
+            bg='#000000',
+            font=("Segoe UI", 10, "normal"),
+            justify='center'
+        )
+        system_info.pack(pady=(5, 0))
+        
+        # Security Notice Section
+        security_section = tk.Frame(main_container, bg='#000000')
+        security_section.pack(pady=(10, 15), padx=20, fill='x')
+        
+        security_title = tk.Label(
+            security_section,
+            text="⚠️ SECURITY NOTICE",
+            fg='red',
+            bg='#000000',
+            font=("Segoe UI", 12, "bold"),
+            justify='center'
+        )
+        security_title.pack()
+        
+        security_notice = tk.Label(
+            security_section,
+            text="All activities are being recorded\nUnauthorized access is prohibited",
+            fg='white',
+            bg='#000000',
+            font=("Segoe UI", 10, "normal"),
+            justify='center'
+        )
+        security_notice.pack(pady=(5, 0))
+        
+        # Schedule periodic updates
+        self.schedule_watermark_update()
+    
+    def get_current_user_details(self):
+        """Get detailed information about the current authenticated user."""
+        details = {
+            'display_name': self.current_user or 'Unknown User',
+            'role': self.current_role or 'unknown',
+            'domain': 'Local',
+            'email': None
+        }
+        
+        # Try to get additional LDAP information
+        if self.current_user and self.ldap_auth:
+            try:
+                ldap_info = self.ldap_auth.get_user_info(self.current_user)
+                if ldap_info:
+                    details['display_name'] = ldap_info.get('display_name', self.current_user)
+                    details['email'] = ldap_info.get('email')
+                    details['domain'] = self.ldap_auth.base_dn
+            except Exception as e:
+                print(f"Could not fetch LDAP details: {e}")
+                
+        return details
+    
+    def schedule_watermark_update(self):
+        """Schedule periodic updates of the watermark content."""
+        if self.watermark_active and self.watermark_window:
+            # Update every 30 seconds
+            self.watermark_update_timer = self.root.after(30000, self.update_watermark_content)
+    
+    def update_watermark_content(self):
+        """Update the watermark content with current information."""
+        if not self.watermark_active or not self.watermark_window:
+            return
+            
+        try:
+            # Check if window still exists
+            if not self.watermark_window.winfo_exists():
+                self.watermark_active = False
+                self.watermark_window = None
+                return
+                
+            # Clear existing content
+            for widget in self.watermark_window.winfo_children():
+                widget.destroy()
+                
+            # Recreate content with updated information
+            self.create_watermark_content()
+            
+            # Ensure window remains on top and properly configured
+            self.watermark_window.lift()
+            self.watermark_window.attributes("-topmost", True)
+            
+        except tk.TclError:
+            # Window was destroyed externally
+            self.watermark_active = False
+            self.watermark_window = None
+        except Exception as e:
+            print(f"Error updating watermark: {e}")
+            
+        # Schedule next update only if watermark is still active
+        if self.watermark_active:
+            self.schedule_watermark_update()
+    
+    def show_watermark_overlay(self):
+        """Show the transparent watermark overlay."""
+        if not self.watermark_active:
+            self.create_watermark_overlay()
+        elif self.watermark_window and self.watermark_window.winfo_exists():
+            # If watermark exists but might be hidden, bring it to front
+            self.watermark_window.lift()
+            self.watermark_window.attributes("-topmost", True)
+            print("✓ Watermark overlay brought to front")
+            
+
+    def hide_watermark_overlay(self):
+        """Hide the transparent watermark overlay."""
+        try:
+            # Cancel any pending updates first
+            if self.watermark_update_timer:
+                try:
+                    self.root.after_cancel(self.watermark_update_timer)
+                except:
+                    pass
+                self.watermark_update_timer = None
+                
+            # Set flag to prevent new operations
+            self.watermark_active = False
+            
+            # Destroy window if it exists
+            if self.watermark_window:
+                try:
+                    if self.watermark_window.winfo_exists():
+                        self.watermark_window.destroy()
+                except tk.TclError:
+                    # Window already destroyed
+                    pass
+                self.watermark_window = None
+                
+            SecurityUtils.log_security_event("WATERMARK_HIDDEN", f"Security watermark overlay hidden for user: {self.current_user}")
+            print("✓ Watermark overlay hidden")
+            
+        except Exception as e:
+            print(f"Error hiding watermark: {e}")
+            # Ensure variables are reset even on error
+            self.watermark_active = False
+            self.watermark_window = None
+            self.watermark_update_timer = None
+    
+    def refresh_watermark_if_active(self):
+        """Refresh watermark content if it's currently active."""
+        if not self.watermark_active or not self.watermark_window:
+            return
+            
+        try:
+            # Check if window still exists
+            if not self.watermark_window.winfo_exists():
+                self.watermark_active = False
+                self.watermark_window = None
+                return
+                
+            # Clear and recreate content
+            for widget in self.watermark_window.winfo_children():
+                widget.destroy()
+            self.create_watermark_content()
+            
+            # Ensure window properties are maintained
+            self.watermark_window.lift()
+            self.watermark_window.attributes("-topmost", True)
+            
+            print("✓ Watermark content refreshed")
+        except tk.TclError:
+            # Window was destroyed externally
+            self.watermark_active = False
+            self.watermark_window = None
+        except Exception as e:
+            print(f"Error refreshing watermark: {e}")
+
     def minimize_to_system_tray(self):
-        """Minimize GUI to system tray and start detection system."""
+        """Minimize GUI to system tray, start detection system, and show watermark overlay."""
         self.is_minimized = True
         self.root.iconify()
         
@@ -3737,22 +3847,28 @@ class SecurityGUI:
         if self.detector_service and not self.detection_running:
             self.start_detection_system()
         
-        SecurityUtils.log_security_event("GUI_MINIMIZED", f"User {self.current_user} minimized GUI to system tray - detection started")
-        print("🔽 GUI minimized to system tray. Detection system started.")
+        # Show watermark overlay when system is minimized and monitoring
+        self.show_watermark_overlay()
+        
+        SecurityUtils.log_security_event("GUI_MINIMIZED", f"User {self.current_user} minimized GUI to system tray - detection and watermark started")
+        print("🔽 GUI minimized to system tray. Detection system and watermark overlay started.")
     
     def restore_from_tray(self):
-        """Restore GUI from system tray and stop detection system."""
+        """Restore GUI from system tray, stop detection system, and hide watermark overlay."""
         self.is_minimized = False
         self.root.deiconify()
         self.root.lift()
         self.root.focus_force()
         
+        # Hide watermark overlay when GUI is restored
+        self.hide_watermark_overlay()
+        
         # Stop detection system when GUI is restored
         if self.detector_service and self.detection_running:
             self.stop_detection_system()
         
-        SecurityUtils.log_security_event("GUI_RESTORED", f"User {self.current_user} restored GUI from system tray - detection stopped")
-        print("🔼 GUI restored from system tray. Detection system stopped.")
+        SecurityUtils.log_security_event("GUI_RESTORED", f"User {self.current_user} restored GUI from system tray - detection and watermark stopped")
+        print("🔼 GUI restored from system tray. Detection system and watermark overlay stopped.")
     
     def start_detection_system(self):
         """Start the detection system in a separate thread."""
@@ -3832,6 +3948,13 @@ class SecurityGUI:
                 current_user_temp = self.current_user  # Store for logging
                 self.current_user = None
                 self.current_role = None
+                
+                # Hide watermark overlay on logout
+                self.hide_watermark_overlay()
+                
+                # Stop detection system if running
+                if self.detection_running:
+                    self.stop_detection_system()
                 
                 if self.auth_manager:
                     self.auth_manager.logout()
@@ -3926,10 +4049,6 @@ class SecurityGUI:
             cursor='hand2'
         )
         retry_btn.pack(pady=(0, 20))
-    
-    def show_security_error(self, title, message):
-        """Show security error dialog."""
-        self.show_custom_dialog(title, message, "error")
 
 
 if __name__ == "__main__":

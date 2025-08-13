@@ -31,9 +31,12 @@ class AlertSystem:
         self.recording_alert_active = False
         self.password_entry_window = None
         self.password_entry = None
+        self.username_entry = None  # Initialize username_entry for operator auth
         self.retry_button = None  # Initialize retry_button
         self.tools_label = None  # Initialize tools_label
         self.attempts_label = None  # Initialize attempts_label
+        self.error_label = None  # Initialize error_label for auth errors
+        self.error_frame = None  # Initialize error_frame for auth errors
         self.security_utils = SecurityUtils()
         self.ldap = LDAPAuthenticator(config)
         
@@ -325,11 +328,11 @@ Time: {sys_info['timestamp']}"""
             )
             info_label.pack(pady=20)
 
-            # Close button - now requires password
+            # Close button - now requires operator authentication
             close_button = tk.Button(
                 self.recording_alert_window,
-                text="Enter Security Password to Continue",
-                command=self.show_password_entry_dialog,
+                text="Operator Authorization Required",
+                command=self.show_operator_auth_dialog,
                 font=("Helvetica", 18, "bold"),
                 bg="yellow",
                 fg="black",
@@ -338,15 +341,15 @@ Time: {sys_info['timestamp']}"""
             )
             close_button.pack(pady=30)
             
-            # Warning about password
-            password_warning = tk.Label(
+            # Warning about operator authentication
+            auth_warning = tk.Label(
                 self.recording_alert_window,
-                text="⚠️ Security password required to dismiss this alert ⚠️",
+                text="⚠️ Operator or Administrator login required to dismiss this alert ⚠️",
                 fg="yellow",
                 bg="darkred",
                 font=("Helvetica", 16, "bold")
             )
-            password_warning.pack(pady=10)
+            auth_warning.pack(pady=10)
             
             # Grace period information
             grace_info = tk.Label(
@@ -442,15 +445,15 @@ Time: {sys_info['timestamp']}"""
             
             SecurityUtils.log_security_event("RECORDING_ALERT_CLOSED", "Recording alert closed after password verification - grace period started")
 
-    def show_password_entry_dialog(self):
-        """Show password entry dialog for recording alert dismissal"""
+    def show_operator_auth_dialog(self):
+        """Show operator authentication dialog for recording alert dismissal"""
         if self.password_entry_window is not None:
             return  # Already showing
             
         self.create_root()
         
         self.password_entry_window = tk.Toplevel(self.root)
-        self.password_entry_window.title("Security Verification Required")
+        self.password_entry_window.title("Operator Authorization Required")
         self.password_entry_window.attributes("-topmost", True)
         self.password_entry_window.attributes("-fullscreen", True)
         self.password_entry_window.configure(bg='black')
@@ -464,7 +467,7 @@ Time: {sys_info['timestamp']}"""
         # Security warning
         warning_label = tk.Label(
             main_frame,
-            text="🔒 SECURITY VERIFICATION REQUIRED 🔒",
+            text="🔒 OPERATOR AUTHORIZATION REQUIRED 🔒",
             fg="red",
             bg="black",
             font=("Helvetica", 36, "bold")
@@ -474,9 +477,9 @@ Time: {sys_info['timestamp']}"""
         # Violation message
         violation_text = f"""SECURITY VIOLATION DETECTED
 Screen recording/capture attempt blocked
-Administrator password required to continue
+Operator or Administrator authentication required to continue
 
-After password verification, you will have {Config.RECORDING_GRACE_PERIOD} seconds
+After successful authentication, you will have {Config.RECORDING_GRACE_PERIOD} seconds
 to close all recording applications before the alert reappears."""
 
         violation_label = tk.Label(
@@ -489,29 +492,50 @@ to close all recording applications before the alert reappears."""
         )
         violation_label.pack(pady=20)
         
-        # Attempts remaining
+        # Authentication attempts remaining
         attempts_remaining = Config.MAX_PASSWORD_ATTEMPTS - self.security_utils.password_attempts
         self.attempts_label = tk.Label(
             main_frame,
-            text=f"Attempts remaining: {attempts_remaining}",
+            text=f"Authentication attempts remaining: {attempts_remaining}",
             fg="yellow",
             bg="black",
             font=("Helvetica", 18, "bold")
         )
         self.attempts_label.pack(pady=10)
         
-        # Password entry frame
-        password_frame = tk.Frame(main_frame, bg='black')
-        password_frame.pack(pady=30)
+        # Username entry frame
+        username_frame = tk.Frame(main_frame, bg='black')
+        username_frame.pack(pady=20)
         
-        password_label = tk.Label(
-            password_frame,
-            text="Security Password:",
+        username_label = tk.Label(
+            username_frame,
+            text="Operator Username:",
             fg="white",
             bg="black",
             font=("Helvetica", 18, "bold")
         )
-        password_label.pack(pady=10)
+        username_label.pack(pady=5)
+        
+        self.username_entry = tk.Entry(
+            username_frame,
+            font=("Helvetica", 16),
+            width=30,
+            justify="center"
+        )
+        self.username_entry.pack(pady=5)
+        
+        # Password entry frame
+        password_frame = tk.Frame(main_frame, bg='black')
+        password_frame.pack(pady=20)
+        
+        password_label = tk.Label(
+            password_frame,
+            text="Password:",
+            fg="white",
+            bg="black",
+            font=("Helvetica", 18, "bold")
+        )
+        password_label.pack(pady=5)
         
         self.password_entry = tk.Entry(
             password_frame,
@@ -520,11 +544,12 @@ to close all recording applications before the alert reappears."""
             width=30,
             justify="center"
         )
-        self.password_entry.pack(pady=10)
-        self.password_entry.focus_set()
+        self.password_entry.pack(pady=5)
+        self.username_entry.focus_set()  # Start with username focus
         
-        # Bind Enter key to password verification
-        self.password_entry.bind('<Return>', lambda e: self.verify_password_and_close())
+        # Bind Enter key to move between fields and submit
+        self.username_entry.bind('<Return>', lambda e: self.password_entry.focus_set())
+        self.password_entry.bind('<Return>', lambda e: self.verify_operator_and_close())
         
         # Buttons frame
         button_frame = tk.Frame(main_frame, bg='black')
@@ -532,8 +557,8 @@ to close all recording applications before the alert reappears."""
         
         verify_button = tk.Button(
             button_frame,
-            text="Verify Password",
-            command=self.verify_password_and_close,
+            text="Authenticate",
+            command=self.verify_operator_and_close,
             font=("Helvetica", 16, "bold"),
             bg="green",
             fg="white",
@@ -542,23 +567,24 @@ to close all recording applications before the alert reappears."""
         )
         verify_button.pack(side="left", padx=10)
         
-        hint_button = tk.Button(
+        cancel_button = tk.Button(
             button_frame,
-            text="Show Hint",
-            command=self.show_password_hint,
+            text="Cancel",
+            command=self.close_operator_dialog,
             font=("Helvetica", 16, "bold"),
-            bg="blue",
+            bg="red",
             fg="white",
             width=15,
             height=2
         )
-        hint_button.pack(side="left", padx=10)
+        cancel_button.pack(side="left", padx=10)
         
         # System info
         sys_info = SecurityUtils.get_system_info()
         info_text = f"""SYSTEM LOCKED:
 Computer: {sys_info['computer_name']} | IP: {sys_info['ip_address']}
-User: {sys_info['username']} | Time: {sys_info['timestamp']}"""
+Current User: {sys_info['username']} | Time: {sys_info['timestamp']}
+Required Role: Operator or Administrator"""
         
         info_label = tk.Label(
             main_frame,
@@ -570,87 +596,210 @@ User: {sys_info['username']} | Time: {sys_info['timestamp']}"""
         )
         info_label.pack(pady=(50, 20))
         
-        SecurityUtils.log_security_event("PASSWORD_DIALOG_SHOWN", "Security password dialog displayed")
+        SecurityUtils.log_security_event("OPERATOR_AUTH_DIALOG_SHOWN", "Operator authentication dialog displayed for recording violation")
 
-    def verify_password_and_close(self):
-        """Verify entered password and close dialog if correct"""
-        if not hasattr(self, 'password_entry') or self.password_entry is None:
-            return
+    def verify_operator_and_close(self):
+        """Verify operator credentials and close dialog if authorized"""
+        try:
+            if not hasattr(self, 'username_entry') or not hasattr(self, 'password_entry'):
+                return
+            if self.username_entry is None or self.password_entry is None:
+                return
+                
+            username = self.username_entry.get().strip()
+            password = self.password_entry.get()
             
-        entered_password = self.password_entry.get()
-        self.security_utils.password_attempts += 1
-        
-        if self.security_utils.verify_password(entered_password):
-            # Correct password
-            SecurityUtils.log_security_event("PASSWORD_VERIFIED", "Security password verified successfully")
-            self.close_password_dialog()
-            self.hide_recording_alert()
-            self.start_recording_grace_period() # Start grace period
-            self.security_utils.password_attempts = 0  # Reset attempts
-        else:
-            # Incorrect password
+            if not username or not password:
+                self.show_auth_error("Please enter both username and password")
+                return
+            
+            self.security_utils.password_attempts += 1
+            
+            try:
+                # Authenticate with LDAP
+                credentials = {'username': username, 'password': password}
+                success, result = self.ldap.authenticate(credentials)
+                
+                if success and isinstance(result, dict):
+                    user_role = result.get('role', '').lower()
+                    display_name = result.get('display_name', username)
+                    
+                    # Check if user has operator or admin role
+                    if user_role in ['operator', 'admin']:
+                        # Authorization successful
+                        SecurityUtils.log_security_event("OPERATOR_AUTH_SUCCESS", 
+                            f"Operator authorization successful - User: {username} ({display_name}), Role: {user_role}")
+                        
+                        self.close_operator_dialog()
+                        self.hide_recording_alert()
+                        self.start_recording_grace_period()
+                        self.security_utils.password_attempts = 0  # Reset attempts
+                        
+                        # Show success message briefly
+                        self.show_auth_success(display_name, user_role)
+                        return
+                        
+                    else:
+                        # User authenticated but doesn't have required role
+                        SecurityUtils.log_security_event("OPERATOR_AUTH_INSUFFICIENT_ROLE", 
+                            f"User {username} authenticated but has insufficient role: {user_role}")
+                        self.show_auth_error(f"Access Denied: '{user_role}' role insufficient.\nOperator or Administrator role required.")
+                else:
+                    # Authentication failed
+                    SecurityUtils.log_security_event("OPERATOR_AUTH_FAILED", 
+                        f"Operator authentication failed for user: {username}")
+                    self.show_auth_error("Invalid username or password")
+                    
+            except Exception as auth_error:
+                # LDAP connection or other error
+                SecurityUtils.log_security_event("OPERATOR_AUTH_ERROR", 
+                    f"Operator authentication error for user {username}: {str(auth_error)}")
+                self.show_auth_error(f"Authentication system error")
+            
+            # Check if maximum attempts reached
             attempts_remaining = Config.MAX_PASSWORD_ATTEMPTS - self.security_utils.password_attempts
-            
             if attempts_remaining <= 0:
-                # Maximum attempts reached
-                SecurityUtils.log_security_event("PASSWORD_MAX_ATTEMPTS", "Maximum password attempts reached - system locked")
-                self.handle_max_password_attempts()
+                SecurityUtils.log_security_event("OPERATOR_AUTH_MAX_ATTEMPTS", 
+                    "Maximum operator authentication attempts reached - system locked")
+                self.handle_max_auth_attempts()
             else:
-                # Flash red and show remaining attempts
-                self.password_entry_window.configure(bg='darkred')
-                self.password_entry.delete(0, tk.END)
+                # Update attempts remaining
+                if hasattr(self, 'attempts_label') and self.attempts_label:
+                    self.attempts_label.config(
+                        text=f"Authentication attempts remaining: {attempts_remaining}", 
+                        fg="red" if attempts_remaining <= 2 else "yellow"
+                    )
                 
-                # Update attempts remaining label
-                self.attempts_label.config(text=f"Attempts remaining: {attempts_remaining}", fg="red")
+                # Clear password field
+                if hasattr(self, 'password_entry') and self.password_entry:
+                    self.password_entry.delete(0, tk.END)
+                    self.password_entry.focus_set()
+                    
+        except Exception as e:
+            # Catch any unexpected errors to prevent crashes
+            SecurityUtils.log_security_event("OPERATOR_AUTH_CRITICAL_ERROR", 
+                f"Critical error in operator authentication: {str(e)}")
+            print(f"Critical error in operator authentication: {e}")
+            # Try to close the dialog safely
+            try:
+                self.close_operator_dialog()
+            except:
+                pass
+
+    def show_auth_error(self, message):
+        """Show authentication error message"""
+        if hasattr(self, 'password_entry_window') and self.password_entry_window:
+            # Flash red background
+            self.password_entry_window.configure(bg='darkred')
+            
+            # Create or update error label
+            if not hasattr(self, 'error_label') or not self.error_label:
+                # Find the main frame (should be the first child)
+                main_frame = None
+                for child in self.password_entry_window.winfo_children():
+                    if isinstance(child, tk.Frame):
+                        main_frame = child
+                        break
                 
-                # Flash back to black
-                self.root.after(1000, lambda: self.password_entry_window.configure(bg='black'))
+                if main_frame:
+                    # Create error frame within the main frame
+                    self.error_frame = tk.Frame(main_frame, bg='darkred')
+                    self.error_frame.pack(pady=10)
+                    
+                    self.error_label = tk.Label(
+                        self.error_frame,
+                        text=message,
+                        fg="white",
+                        bg="darkred",
+                        font=("Helvetica", 14, "bold"),
+                        justify="center",
+                        wraplength=600
+                    )
+                    self.error_label.pack()
+                else:
+                    # Fallback: create error as overlay
+                    self.error_label = tk.Label(
+                        self.password_entry_window,
+                        text=message,
+                        fg="white",
+                        bg="darkred",
+                        font=("Helvetica", 14, "bold"),
+                        justify="center",
+                        wraplength=600
+                    )
+                    self.error_label.place(relx=0.5, rely=0.1, anchor="center")
+            else:
+                # Update existing error label
+                self.error_label.config(text=message)
+            
+            # Flash back to black after 2 seconds and remove error
+            self.root.after(2000, self.clear_auth_error)
 
-    def show_password_hint(self):
-        """Show encrypted password hint"""
-        hint = self.security_utils.get_security_password_hint()
-        
-        hint_window = tk.Toplevel(self.password_entry_window)
-        hint_window.title("Password Hint")
-        hint_window.attributes("-topmost", True)
-        hint_window.configure(bg='darkblue')
-        hint_window.geometry("600x300")
-        hint_window.resizable(False, False)
-        
-        hint_label = tk.Label(
-            hint_window,
-            text="PASSWORD HINT:",
-            fg="white",
-            bg="darkblue",
-            font=("Helvetica", 16, "bold")
-        )
-        hint_label.pack(pady=20)
-        
-        hint_text_label = tk.Label(
-            hint_window,
-            text=hint,
-            fg="yellow",
-            bg="darkblue",
-            font=("Helvetica", 12),
-            wraplength=550,
-            justify="center"
-        )
-        hint_text_label.pack(pady=20)
-        
-        close_hint_button = tk.Button(
-            hint_window,
-            text="Close Hint",
-            command=hint_window.destroy,
-            font=("Helvetica", 12, "bold"),
-            bg="white",
-            fg="darkblue"
-        )
-        close_hint_button.pack(pady=20)
-        
-        SecurityUtils.log_security_event("PASSWORD_HINT_REQUESTED", "User requested password hint")
+    def clear_auth_error(self):
+        """Clear authentication error display"""
+        try:
+            if hasattr(self, 'password_entry_window') and self.password_entry_window:
+                self.password_entry_window.configure(bg='black')
+                
+            if hasattr(self, 'error_label') and self.error_label:
+                self.error_label.destroy()
+                self.error_label = None
+                
+            if hasattr(self, 'error_frame') and self.error_frame:
+                self.error_frame.destroy()
+                self.error_frame = None
+        except tk.TclError:
+            # Widget may have been destroyed already, ignore the error
+            pass
 
-    def handle_max_password_attempts(self):
-        """Handle maximum password attempts reached"""
+    def show_auth_success(self, display_name, role):
+        """Show brief success message"""
+        try:
+            if hasattr(self, 'password_entry_window') and self.password_entry_window:
+                # Create success overlay
+                success_frame = tk.Frame(self.password_entry_window, bg='darkgreen')
+                success_frame.place(relx=0.5, rely=0.5, anchor="center")
+                
+                success_label = tk.Label(
+                    success_frame,
+                    text=f"✓ Authorization Successful\n{display_name} ({role.upper()})",
+                    fg="white",
+                    bg="darkgreen",
+                    font=("Helvetica", 20, "bold"),
+                    justify="center",
+                    padx=50,
+                    pady=30
+                )
+                success_label.pack()
+                
+                # Remove after 1.5 seconds
+                self.root.after(1500, lambda: self.safe_destroy_widget(success_frame))
+        except Exception as e:
+            # If success message fails, just log it - don't prevent the successful auth
+            SecurityUtils.log_security_event("AUTH_SUCCESS_DISPLAY_ERROR", f"Error showing success message: {e}")
+
+    def safe_destroy_widget(self, widget):
+        """Safely destroy a widget"""
+        try:
+            if widget and widget.winfo_exists():
+                widget.destroy()
+        except tk.TclError:
+            pass  # Widget already destroyed
+
+    def close_operator_dialog(self):
+        """Close the operator authentication dialog"""
+        if self.password_entry_window is not None:
+            self.password_entry_window.destroy()
+            self.password_entry_window = None
+            self.password_entry = None
+            self.username_entry = None
+            if hasattr(self, 'error_label'):
+                self.error_label = None
+            if hasattr(self, 'error_frame'):
+                self.error_frame = None
+
+    def handle_max_auth_attempts(self):
+        """Handle maximum authentication attempts reached"""
         # Update the dialog to show system locked
         if self.password_entry_window:
             for widget in self.password_entry_window.winfo_children():
@@ -668,7 +817,7 @@ User: {sys_info['username']} | Time: {sys_info['timestamp']}"""
             
             message_label = tk.Label(
                 self.password_entry_window,
-                text="Maximum password attempts exceeded\nContact system administrator immediately\nAll activities are being logged",
+                text="Maximum authentication attempts exceeded\nContact system administrator immediately\nAll activities are being logged and monitored",
                 fg="white",
                 bg="black",
                 font=("Helvetica", 20, "bold"),
@@ -677,14 +826,18 @@ User: {sys_info['username']} | Time: {sys_info['timestamp']}"""
             message_label.pack(pady=50)
         
         # Log critical security event
-        SecurityUtils.log_security_event("CRITICAL_SECURITY_BREACH", "Maximum password attempts exceeded - system locked permanently")
+        SecurityUtils.log_security_event("CRITICAL_SECURITY_BREACH", 
+            "Maximum operator authentication attempts exceeded - system locked permanently")
+
+    def handle_max_password_attempts(self):
+        """Handle maximum password attempts reached - kept for backward compatibility"""
+        # Redirect to the new method
+        self.handle_max_auth_attempts()
 
     def close_password_dialog(self):
-        """Close the password entry dialog"""
-        if self.password_entry_window is not None:
-            self.password_entry_window.destroy()
-            self.password_entry_window = None
-            self.password_entry = None
+        """Close the password entry dialog - kept for backward compatibility"""
+        # Redirect to the new method
+        self.close_operator_dialog()
 
     def is_recording_grace_period_active(self):
         """Check if we're currently in the grace period after password entry."""
