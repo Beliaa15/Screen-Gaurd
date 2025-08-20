@@ -12,6 +12,7 @@ import os
 from datetime import datetime
 from pathlib import Path
 import cv2
+import tempfile
 from PIL import Image, ImageTk
 
 # Try to import Windows-specific modules for click-through functionality
@@ -387,8 +388,17 @@ class SecurityGUI:
                     display_height = 240
                     frame = cv2.resize(frame, (display_width, display_height))
                     
+                    # Analyze lighting quality
+                    lighting_status, brightness, contrast = self.analyze_lighting_quality(frame)
+                    
+                    # Detect faces
+                    face_count, faces = self.detect_face_count(frame)
+                    
+                    # Draw overlay with analysis results
+                    frame_with_overlay = self.draw_camera_overlay(frame, lighting_status, face_count, faces)
+                    
                     # Convert BGR to RGB
-                    frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+                    frame_rgb = cv2.cvtColor(frame_with_overlay, cv2.COLOR_BGR2RGB)
                     
                     # Convert to PIL Image and then to PhotoImage
                     pil_image = Image.fromarray(frame_rgb)
@@ -424,6 +434,124 @@ class SecurityGUI:
             self.camera_cap = None
             
         self.preview_label = None
+    
+    def analyze_lighting_quality(self, frame):
+        """Analyze lighting quality of the frame."""
+        try:
+            # Convert to grayscale for lighting analysis
+            gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+            
+            # Calculate mean brightness
+            mean_brightness = cv2.mean(gray)[0]
+            
+            # Calculate contrast (standard deviation)
+            contrast = gray.std()
+            
+            # Define thresholds
+            if mean_brightness < 50:
+                return "too_dark", mean_brightness, contrast
+            elif mean_brightness > 220:
+                return "too_bright", mean_brightness, contrast
+            elif contrast < 20:
+                return "low_contrast", mean_brightness, contrast
+            else:
+                return "good", mean_brightness, contrast
+                
+        except Exception as e:
+            print(f"Lighting analysis error: {e}")
+            return "unknown", 0, 0
+    
+    def detect_face_count(self, frame):
+        """Detect number of faces in the frame using OpenCV's face detector."""
+        try:
+            # Use OpenCV's built-in face detector (faster than DeepFace for real-time)
+            cascade_path = cv2.data.haarcascades + 'haarcascade_frontalface_default.xml'
+            
+            # Check if cascade file exists
+            if not os.path.exists(cascade_path):
+                print(f"Face cascade file not found: {cascade_path}")
+                return 0, []
+            
+            face_cascade = cv2.CascadeClassifier(cascade_path)
+            
+            if face_cascade.empty():
+                print("Failed to load face cascade classifier")
+                return 0, []
+            
+            # Convert to grayscale for face detection
+            gray = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+            gray = cv2.cvtColor(gray, cv2.COLOR_RGB2GRAY)
+            
+            # Detect faces with adjusted parameters for better accuracy
+            faces = face_cascade.detectMultiScale(
+                gray,
+                scaleFactor=1.1,
+                minNeighbors=5,
+                minSize=(30, 30),
+                maxSize=(150, 150),  # Limit max size for camera preview
+                flags=cv2.CASCADE_SCALE_IMAGE
+            )
+            
+            return len(faces), faces
+            
+        except Exception as e:
+            print(f"Face detection error: {e}")
+            return 0, []
+    
+    def draw_camera_overlay(self, frame, lighting_status, face_count, faces):
+        """Draw overlay information on the camera frame."""
+        try:
+            # Create a copy to draw on
+            overlay_frame = frame.copy()
+            
+            # Draw face rectangles
+            for i, (x, y, w, h) in enumerate(faces):
+                color = (0, 255, 0) if face_count == 1 else (0, 0, 255)  # Green for 1 face, red for multiple
+                cv2.rectangle(overlay_frame, (x, y), (x+w, y+h), color, 2)
+                
+                # Only add face labels for violations (multiple people)
+                if face_count != 1:
+                    label_text = f"Person {i+1}"
+                    cv2.putText(overlay_frame, label_text, (x, y-10), 
+                               cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 2)
+            
+            # Collect all violation messages to display at top left
+            violation_messages = []
+            y_offset = 25
+            
+            # Check lighting violations
+            if lighting_status != "good":
+                lighting_messages = {
+                    "too_dark": "TOO DARK - Need more light",
+                    "too_bright": "TOO BRIGHT - Reduce light", 
+                    "low_contrast": "LOW CONTRAST - Adjust lighting",
+                    "unknown": "CHECKING LIGHTING..."
+                }
+                lighting_msg = lighting_messages.get(lighting_status, "CHECKING...")
+                if lighting_msg:
+                    violation_messages.append((lighting_msg, (0, 165, 255)))  # Orange for lighting issues
+            
+            # Check person count violations
+            if face_count != 1:
+                if face_count == 0:
+                    person_msg = "NO FACE DETECTED"
+                    person_color = (0, 0, 255)  # Red
+                else:
+                    person_msg = f"{face_count} PEOPLE DETECTED - Only 1 allowed"
+                    person_color = (0, 0, 255)  # Red
+                violation_messages.append((person_msg, person_color))
+            
+            # Display all violation messages at top left
+            for msg, color in violation_messages:
+                cv2.putText(overlay_frame, msg, (10, y_offset), 
+                           cv2.FONT_HERSHEY_SIMPLEX, 0.4, color, 2)
+                y_offset += 25
+            
+            return overlay_frame
+            
+        except Exception as e:
+            print(f"Overlay drawing error: {e}")
+            return frame
     
     def show_custom_dialog(self, title, message, dialog_type="info", input_field=False, password=False, callback=None):
         """Show a modern custom dialog within the GUI."""
@@ -1307,7 +1435,7 @@ class SecurityGUI:
             text="📹\nInitializing Camera...",
             fg=self.colors['on_surface'],
             bg=self.colors['surface'],
-            font=("Segoe UI", 16, "normal"),
+            font=("Segoe UI", 12, "normal"),
             width=40,
             height=15,
             relief='solid',
@@ -2885,7 +3013,6 @@ class SecurityGUI:
             self.reg_status_label.config(text="Processing with AI...", fg=self.colors['warning'])
             
             # Save temporary image
-            import tempfile
             with tempfile.NamedTemporaryFile(suffix='.jpg', delete=False) as temp_file:
                 temp_path = temp_file.name
                 cv2.imwrite(temp_path, frame)
