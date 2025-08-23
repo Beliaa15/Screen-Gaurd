@@ -69,9 +69,9 @@ class Config:
     SNIPPING_TOOL_DETECTION_MESSAGE = "Snipping Tool Hotkey"
     
     # Camera Preview Settings
-    CAMERA_PREVIEW_WIDTH = 640
-    CAMERA_PREVIEW_HEIGHT = 480
-    CAMERA_PREVIEW_FPS = 15
+    CAMERA_PREVIEW_WIDTH = 1280
+    CAMERA_PREVIEW_HEIGHT = 720
+    CAMERA_PREVIEW_FPS = 30
     CAMERA_INIT_TIMEOUT = 5  # seconds
     
     @classmethod
@@ -82,7 +82,7 @@ class Config:
         Path(cls.FACE_IMAGES_DIR).mkdir(exist_ok=True)
 
     # LDAP Configuration
-    LDAP_SERVER = "ldaps://192.168.1.5"  # Use LDAPS since it's working
+    LDAP_SERVER = "ldaps://192.168.1.12"  # Use LDAPS since it's working
     LDAP_USE_SSL = True  # Enable SSL since LDAPS is working
     LDAP_SSL_PORT = 636  # Standard LDAPS port
     LDAP_VERIFY_SSL = False  # Don't verify self-signed certificates
@@ -133,3 +133,33 @@ class Config:
     # Session Management
     SESSION_CHECK_INTERVAL = 60  # seconds
     IDLE_TIMEOUT = 30 * 60  # 30 minutes in seconds
+
+    # Biometric + AD Certificate Service Configuration
+    BIOMETRIC_SERVICES_ENABLED = True
+    
+    # Service URLs
+    FACE_SERVICE_URL = "http://localhost:5001"  # RetinaFace + ArcFace ONNX service
+    FINGER_SERVICE_URL = "http://localhost:5002"  # SourceAFIS service
+    AUTH_ORCHESTRATOR_URL = "http://localhost:5000"  # Main orchestrator
+    
+    # Service timeouts (seconds)
+    BIOMETRIC_SERVICE_TIMEOUT = 30
+    ORCHESTRATOR_TIMEOUT = 45
+    
+    # Pre-logon Helper configuration
+    PRELOGON_HELPER_PIPE = r"\\.\pipe\BiometricPreLogon"
+    ENROLLMENT_AGENT_PIPE = r"\\.\pipe\CertEnrollmentAgent"
+    
+    # Certificate configuration
+    CERT_VALIDITY_MINUTES = 5  # Short-lived certificate validity
+    CERT_TEMPLATE_NAME = "SmartCardLogon"  # AD CS template
+    CERT_STORE_NAME = "MY"  # LocalMachine certificate store
+    
+    # Fallback settings
+    ALLOW_LEGACY_AUTH_FALLBACK = True  # Allow LDAP fallback if services unavailable
+    REQUIRE_BIOMETRIC_FOR_DOMAIN = True  # Require biometric for domain users
+    
+    # Active Directory Certificate Services
+    AD_CS_SERVER = "ca.security-local.com"  # Your CA server
+    AD_CS_TEMPLATE = "SmartCardLogon"  # Certificate template
+    AD_UPN_DOMAIN = "security-local.com"  # UPN domain for SAN

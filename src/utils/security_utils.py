@@ -169,6 +169,158 @@ class SecurityUtils:
             print(f"Error logging security event: {e}")
     
     @staticmethod
+    def log_biometric_orchestrator_event(event_type: str, username: str = "", 
+                                       service_name: str = "", details: str = "",
+                                       auth_token: str = "", cert_thumbprint: str = "") -> None:
+        """Log biometric orchestrator and certificate provider events with enhanced details."""
+        try:
+            # Ensure logs directory exists
+            Config.ensure_directories()
+            
+            # Create log filename with current date
+            log_date = datetime.now().strftime(Config.LOG_DATE_FORMAT)
+            log_filename = f"security_log_{log_date}.txt"
+            log_filepath = Path(Config.LOGS_DIR) / log_filename
+            
+            # Get system info
+            sys_info = SecurityUtils.get_system_info()
+            
+            # Build enhanced log entry for orchestrator events
+            log_entry_parts = [
+                f"[{sys_info['timestamp']}]",
+                f"ORCHESTRATOR_{event_type}",
+                f"Computer: {sys_info['computer_name']}",
+                f"User: {sys_info['username']}",
+                f"IP: {sys_info['ip_address']}"
+            ]
+            
+            # Add orchestrator-specific fields if provided
+            if username:
+                log_entry_parts.append(f"Target_User: {username}")
+            if service_name:
+                log_entry_parts.append(f"Service: {service_name}")
+            if auth_token:
+                # Only log first 8 characters of auth token for security
+                log_entry_parts.append(f"Auth_Token: {auth_token[:8]}...")
+            if cert_thumbprint:
+                log_entry_parts.append(f"Cert_Thumbprint: {cert_thumbprint}")
+            if details:
+                log_entry_parts.append(f"Details: {details}")
+            
+            log_entry = " | ".join(log_entry_parts) + "\n"
+            
+            # Write to log file
+            with open(log_filepath, 'a', encoding='utf-8') as log_file:
+                log_file.write(log_entry)
+                
+            # Also print to console for immediate feedback
+            print(f"🛡️ ORCHESTRATOR_{event_type}: {username} - {details}")
+                
+        except Exception as e:
+            print(f"Error logging orchestrator event: {e}")
+    
+    @staticmethod
+    def log_certificate_provider_event(event_type: str, username: str = "",
+                                     certificate_data: str = "", pkinit_data: str = "",
+                                     enrollment_status: str = "", details: str = "") -> None:
+        """Log certificate provider and enrollment agent events."""
+        try:
+            # Ensure logs directory exists
+            Config.ensure_directories()
+            
+            # Create log filename with current date
+            log_date = datetime.now().strftime(Config.LOG_DATE_FORMAT)
+            log_filename = f"security_log_{log_date}.txt"
+            log_filepath = Path(Config.LOGS_DIR) / log_filename
+            
+            # Get system info
+            sys_info = SecurityUtils.get_system_info()
+            
+            # Build enhanced log entry for certificate provider events
+            log_entry_parts = [
+                f"[{sys_info['timestamp']}]",
+                f"CERT_PROVIDER_{event_type}",
+                f"Computer: {sys_info['computer_name']}",
+                f"User: {sys_info['username']}",
+                f"IP: {sys_info['ip_address']}"
+            ]
+            
+            # Add certificate provider-specific fields if provided
+            if username:
+                log_entry_parts.append(f"Target_User: {username}")
+            if certificate_data:
+                # Only log cert thumbprint/identifier for security
+                log_entry_parts.append(f"Cert_ID: {certificate_data[:16]}...")
+            if pkinit_data:
+                log_entry_parts.append(f"PKINIT_Data: {len(pkinit_data)} bytes")
+            if enrollment_status:
+                log_entry_parts.append(f"Enrollment_Status: {enrollment_status}")
+            if details:
+                log_entry_parts.append(f"Details: {details}")
+            
+            log_entry = " | ".join(log_entry_parts) + "\n"
+            
+            # Write to log file
+            with open(log_filepath, 'a', encoding='utf-8') as log_file:
+                log_file.write(log_entry)
+                
+            # Also print to console for immediate feedback
+            print(f"📜 CERT_PROVIDER_{event_type}: {username} - {details}")
+                
+        except Exception as e:
+            print(f"Error logging certificate provider event: {e}")
+    
+    @staticmethod
+    def log_pre_logon_helper_event(event_type: str, username: str = "",
+                                  biometric_type: str = "", capture_status: str = "",
+                                  enrollment_result: str = "", details: str = "") -> None:
+        """Log pre-logon helper events."""
+        try:
+            # Ensure logs directory exists
+            Config.ensure_directories()
+            
+            # Create log filename with current date
+            log_date = datetime.now().strftime(Config.LOG_DATE_FORMAT)
+            log_filename = f"security_log_{log_date}.txt"
+            log_filepath = Path(Config.LOGS_DIR) / log_filename
+            
+            # Get system info
+            sys_info = SecurityUtils.get_system_info()
+            
+            # Build enhanced log entry for pre-logon helper events
+            log_entry_parts = [
+                f"[{sys_info['timestamp']}]",
+                f"PRE_LOGON_{event_type}",
+                f"Computer: {sys_info['computer_name']}",
+                f"User: {sys_info['username']}",
+                f"IP: {sys_info['ip_address']}"
+            ]
+            
+            # Add pre-logon helper-specific fields if provided
+            if username:
+                log_entry_parts.append(f"Target_User: {username}")
+            if biometric_type:
+                log_entry_parts.append(f"Biometric_Type: {biometric_type}")
+            if capture_status:
+                log_entry_parts.append(f"Capture_Status: {capture_status}")
+            if enrollment_result:
+                log_entry_parts.append(f"Enrollment_Result: {enrollment_result}")
+            if details:
+                log_entry_parts.append(f"Details: {details}")
+            
+            log_entry = " | ".join(log_entry_parts) + "\n"
+            
+            # Write to log file
+            with open(log_filepath, 'a', encoding='utf-8') as log_file:
+                log_file.write(log_entry)
+                
+            # Also print to console for immediate feedback
+            print(f"🔧 PRE_LOGON_{event_type}: {username} - {details}")
+                
+        except Exception as e:
+            print(f"Error logging pre-logon helper event: {e}")
+    
+    @staticmethod
     def validate_password_strength(password: str) -> Dict[str, bool]:
         """Validate password strength and return detailed results."""
         checks = {
